@@ -1,0 +1,219 @@
+"""Meshes with known properties, for tests that need a real surface.
+
+Each returns ``(positions, indices)`` with positions ``(n, 3)`` float32 and
+indices a flat ``uint32`` triple-per-triangle array -- the form the package
+takes. The closed ones are watertight and consistently wound; the open ones have
+a border on purpose; the broken ones are broken on purpose.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+
+
+def _mesh(positions, faces):
+    return (
+        np.asarray(positions, dtype='f4'),
+        np.asarray(faces, dtype=np.uint32).reshape(-1),
+    )
+
+
+def tetrahedron():
+    """Four vertices, four faces, closed and outward-wound."""
+    positions = [
+        (1.0, 1.0, 1.0),
+        (1.0, -1.0, -1.0),
+        (-1.0, 1.0, -1.0),
+        (-1.0, -1.0, 1.0),
+    ]
+    faces = [(0, 1, 2), (0, 3, 1), (0, 2, 3), (1, 3, 2)]
+    return _mesh(positions, faces)
+
+
+def octahedron():
+    """Six vertices, eight faces, closed."""
+    positions = [
+        (1.0, 0.0, 0.0),
+        (-1.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+        (0.0, -1.0, 0.0),
+        (0.0, 0.0, 1.0),
+        (0.0, 0.0, -1.0),
+    ]
+    faces = [
+        (0, 2, 4),
+        (2, 1, 4),
+        (1, 3, 4),
+        (3, 0, 4),
+        (2, 0, 5),
+        (1, 2, 5),
+        (3, 1, 5),
+        (0, 3, 5),
+    ]
+    return _mesh(positions, faces)
+
+
+_ICOSAHEDRON_FACES = [
+    (0, 11, 5),
+    (0, 5, 1),
+    (0, 1, 7),
+    (0, 7, 10),
+    (0, 10, 11),
+    (1, 5, 9),
+    (5, 11, 4),
+    (11, 10, 2),
+    (10, 7, 6),
+    (7, 1, 8),
+    (3, 9, 4),
+    (3, 4, 2),
+    (3, 2, 6),
+    (3, 6, 8),
+    (3, 8, 9),
+    (4, 9, 5),
+    (2, 4, 11),
+    (6, 2, 10),
+    (8, 6, 7),
+    (9, 8, 1),
+]
+
+
+def _icosahedron():
+    phi = (1.0 + 5.0**0.5) / 2.0
+    raw = [
+        (-1, phi, 0),
+        (1, phi, 0),
+        (-1, -phi, 0),
+        (1, -phi, 0),
+        (0, -1, phi),
+        (0, 1, phi),
+        (0, -1, -phi),
+        (0, 1, -phi),
+        (phi, 0, -1),
+        (phi, 0, 1),
+        (-phi, 0, -1),
+        (-phi, 0, 1),
+    ]
+    points = np.asarray(raw, dtype='d')
+    points /= np.linalg.norm(points, axis=1)[:, None]
+    return points, np.asarray(_ICOSAHEDRON_FACES, dtype=np.int64)
+
+
+def icosphere(subdivisions: int = 2):
+    """A closed, near-uniform triangulation of the unit sphere.
+
+    Twenty faces at ``subdivisions=0``, four times as many at each step, so the
+    surface it approximates is known exactly and the deviation of a decimated
+    copy can be compared against the sphere itself.
+    """
+    points, faces = _icosahedron()
+    for _ in range(subdivisions):
+        midpoints: dict[tuple[int, int], int] = {}
+        grown = list(points)
+        out = []
+        for a, b, c in faces:
+
+            def middle(i, j, _grown=grown, _midpoints=midpoints):
+                key = (min(i, j), max(i, j))
+                found = _midpoints.get(key)
+                if found is None:
+                    point = (_grown[i] + _grown[j]) / 2.0
+                    point = point / np.linalg.norm(point)
+                    found = len(_grown)
+                    _grown.append(point)
+                    _midpoints[key] = found
+                return found
+
+            ab, bc, ca = middle(a, b), middle(b, c), middle(c, a)
+            out += [(a, ab, ca), (b, bc, ab), (c, ca, bc), (ab, bc, ca)]
+        points = np.asarray(grown, dtype='d')
+        faces = np.asarray(out, dtype=np.int64)
+    return _mesh(points, faces)
+
+
+def grid(side: int = 5, bump: float = 0.0):
+    """An open ``side`` x ``side`` patch in the XZ plane, with a border.
+
+    ``bump`` raises the middle into a dome, so the surface is not planar and the
+    quadrics have something to say about it.
+    """
+    axis = np.linspace(-1.0, 1.0, side)
+    gx, gz = np.meshgrid(axis, axis, indexing='ij')
+    gy = bump * np.cos(gx * np.pi / 2.0) * np.cos(gz * np.pi / 2.0)
+    positions = np.stack([gx, gy, gz], axis=-1).reshape(-1, 3)
+    faces = []
+    for i in range(side - 1):
+        for j in range(side - 1):
+            a = i * side + j
+            faces += [(a, a + 1, a + side), (a + 1, a + side + 1, a + side)]
+    return _mesh(positions, faces)
+
+
+def bowtie():
+    """Two triangles meeting at one vertex and nowhere else."""
+    positions = [
+        (0.0, 0.0, 0.0),
+        (1.0, 0.0, 0.0),
+        (1.0, 1.0, 0.0),
+        (-1.0, 0.0, 0.0),
+        (-1.0, -1.0, 0.0),
+    ]
+    return _mesh(positions, [(0, 1, 2), (0, 3, 4)])
+
+
+def nonmanifold_edge():
+    """Three triangles sharing one edge -- a surface no orientation covers."""
+    positions = [
+        (0.0, 0.0, 0.0),
+        (1.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+        (0.0, -1.0, 0.0),
+        (0.0, 0.0, 1.0),
+    ]
+    return _mesh(positions, [(0, 1, 2), (0, 1, 3), (0, 1, 4)])
+
+
+def cube_with_hard_normals():
+    """A closed cube whose normals are per-face, so every edge is a seam.
+
+    Eight positions carried by twenty-four vertices -- the arrangement a glTF
+    export of a hard-edged model has, and the one attribute handling has to cope
+    with.
+    """
+    corners = np.asarray(
+        [
+            (-1, -1, -1),
+            (1, -1, -1),
+            (1, 1, -1),
+            (-1, 1, -1),
+            (-1, -1, 1),
+            (1, -1, 1),
+            (1, 1, 1),
+            (-1, 1, 1),
+        ],
+        dtype='d',
+    )
+    quads = [
+        ((0, 3, 2, 1), (0, 0, -1)),
+        ((4, 5, 6, 7), (0, 0, 1)),
+        ((0, 1, 5, 4), (0, -1, 0)),
+        ((2, 3, 7, 6), (0, 1, 0)),
+        ((1, 2, 6, 5), (1, 0, 0)),
+        ((0, 4, 7, 3), (-1, 0, 0)),
+    ]
+    positions, normals, uvs, faces = [], [], [], []
+    for quad, normal in quads:
+        base = len(positions)
+        for offset, index in enumerate(quad):
+            positions.append(corners[index])
+            normals.append(normal)
+            uvs.append(((offset in (1, 2)) * 1.0, (offset in (2, 3)) * 1.0))
+        faces += [(base, base + 1, base + 2), (base, base + 2, base + 3)]
+    pos, idx = _mesh(positions, faces)
+    return (
+        {
+            'POSITION': pos,
+            'NORMAL': np.asarray(normals, dtype='f4'),
+            'TEXCOORD_0': np.asarray(uvs, dtype='f4'),
+        },
+        idx,
+    )

@@ -1,0 +1,129 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "opengl_decimate"
+# Read from src/opengl_decimate/__init__.py -- see [tool.setuptools.dynamic]
+# below. One definition, because .github/workflows/release.yml decides whether
+# to publish by reading `__version__`, and a second copy here that drifted from
+# it would mean the version checked against PyPI was not the version built.
+dynamic = ["version"]
+description = "Triangle mesh decimation over glTF-shaped NumPy arrays"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [
+    { name = "Mike C. Fletcher", email = "mcfletch@vrplumber.com" }
+]
+keywords = [
+    "decimation", "simplification", "mesh", "LOD", "quadric", "glTF",
+    "numpy", "3D", "geometry",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+    "Topic :: Multimedia :: Graphics :: 3D Rendering",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+
+dependencies = [
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+]
+dev = [
+    "opengl_decimate[test]",
+    "mypy",
+    "ruff",
+    "tox>=4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/mcfletch/opengl_decimate"
+Repository = "https://github.com/mcfletch/opengl_decimate"
+
+[tool.setuptools.dynamic]
+version = {attr = "opengl_decimate.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+opengl_decimate = ["py.typed"]
+
+[tool.pytest.ini_options]
+# ``src`` is on testpaths so that the worked examples in the module docstrings
+# are run.
+#
+# ``importlib`` import mode is what lets doctest work against a checkout whose
+# package is *also* installed non-editably: the default mode refuses to collect
+# a file whose module is already imported from somewhere else.
+testpaths = ["tests", "src"]
+addopts = "-ra --doctest-modules --import-mode=importlib"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", "B",
+    "ARG",  # unused arguments -- a parameter nothing reads is a lie in a signature
+    "I",    # import order
+    "UP",   # constructs superseded by the minimum Python
+    "SIM",  # simplifications
+    "C4",   # comprehensions
+    "RUF",
+]
+ignore = [
+    "E501",   # line too long: held by the formatter's line-length, above
+    "E741",   # ambiguous variable name
+    "RUF005", # concatenation is clearer than unpacking for short literal joins
+    # Diagnostics use ``%`` formatting throughout, so that the message and the
+    # values it interpolates read as two separate things. House style across the
+    # stack, consistently applied.
+    "UP031",
+    # ``__all__`` is grouped by what each name is for, with a comment per group.
+    "RUF022",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# A test that pins an error signature has to call the thing that raises, and
+# `pytest.raises` is the assertion -- so its result is deliberately unused.
+"tests/*" = ["ARG001", "ARG002"]
+
+[tool.ruff.format]
+quote-style = "single"
+exclude = ["*.md"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_ignores = true
+ignore_missing_imports = true
+# Without these, mypy skips the bodies of untyped functions entirely
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+# NumPy's shipped stubs type array arithmetic as ``Any``, so ``warn_return_any``
+# fires on nearly every function here that returns an array -- burying the real
+# type errors it would otherwise find. Every other check stays on.
+warn_return_any = false
+
+# uv judges whether its cached metadata for a source tree is current from
+# pyproject.toml alone unless told otherwise, and this project's version lives in
+# src/opengl_decimate/__init__.py.
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/opengl_decimate/__init__.py" }]

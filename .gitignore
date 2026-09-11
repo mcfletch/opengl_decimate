@@ -1,0 +1,14 @@
+build/
+dist/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+
+# uv lock (byproduct of tox-uv; not tracked for a library)
+uv.lock

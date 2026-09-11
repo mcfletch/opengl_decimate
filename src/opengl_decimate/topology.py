@@ -1,0 +1,314 @@
+"""The surface under the arrays: what is joined to what, and what may move.
+
+A mesh arrives as vertices and triangles, but a vertex is not the same thing as
+a *point*: a hard-edged export carries the same corner of a cube as three
+vertices with three different normals. Decimation is a question about the
+surface, so :func:`build` welds vertices that share a position and works in
+those positions, keeping each corner's original vertex alongside so the
+attributes it carried can be handed back at the end.
+
+:meth:`Topology.classify` then says what each position is allowed to do:
+
+``MANIFOLD``
+    A closed fan of faces around it. Free to collapse onto any neighbour.
+``BORDER``
+    On the edge of the surface. May collapse only along the border, which is
+    what keeps a patch's outline where the author put it.
+``LOCKED``
+    Never moves. A non-manifold edge, a bowtie, an isolated point, or a vertex
+    the caller named -- a cluster group's outer boundary arrives this way.
+
+The classification is computed once and stays true for the whole reduction: the
+collapse rules in :mod:`opengl_decimate.collapse` admit only contractions that
+preserve the link of the edge, and those leave every border a border and every
+manifold fan a fan.
+"""
+
+from __future__ import annotations
+
+from enum import IntEnum
+
+import numpy as np
+
+from opengl_decimate.types import DecimateError, FloatArray, IndexArray
+
+__all__ = ['VertexClass', 'Topology', 'build', 'weld_positions']
+
+
+class VertexClass(IntEnum):
+    """What a position is allowed to do during a reduction."""
+
+    MANIFOLD = 0
+    BORDER = 1
+    LOCKED = 2
+
+
+class _DisjointSet:
+    """Union-find over a fixed range, used to count the fans around a vertex."""
+
+    def __init__(self, count: int) -> None:
+        self._parent = np.arange(count, dtype=np.int64)
+
+    def find(self, item: int) -> int:
+        parent = self._parent
+        root = item
+        while parent[root] != root:
+            root = int(parent[root])
+        while parent[item] != root:
+            parent[item], item = root, int(parent[item])
+        return root
+
+    def union(self, left: int, right: int) -> None:
+        left_root, right_root = self.find(left), self.find(right)
+        if left_root != right_root:
+            self._parent[right_root] = left_root
+
+
+def weld_positions(positions: FloatArray, tolerance: float = 0.0) -> tuple[FloatArray, IndexArray]:
+    """Merge vertices that occupy the same point.
+
+    Returns ``(points, vertex_point)``: the distinct points, and which point each
+    input vertex belongs to. Points are numbered by **first appearance**, so a
+    mesh with no coincident vertices welds to itself and a caller's vertex
+    indices still mean what they meant. At ``tolerance`` zero the comparison is
+    exact, which is one vectorised sort. A positive tolerance merges anything
+    within that distance -- which is what a scan needs, since the same corner
+    reconstructed twice differs in the last several bits -- by grouping into
+    cells of that size and joining across the twenty-seven cells a point can
+    have a partner in.
+
+    >>> import numpy as np
+    >>> points, belongs = weld_positions(np.array([[1.0, 0, 0], [0, 0, 0], [1.0, 0, 0]]))
+    >>> belongs.tolist()
+    [0, 1, 0]
+    """
+    positions = np.asarray(positions, dtype='d')
+    if tolerance <= 0.0:
+        _, first, inverse = np.unique(positions, axis=0, return_index=True, return_inverse=True)
+        return _by_first_appearance(positions, inverse.reshape(-1), len(first))
+
+    cells = np.floor(positions / tolerance).astype(np.int64)
+    buckets: dict[tuple[int, int, int], list[int]] = {}
+    for index, cell in enumerate(map(tuple, cells)):
+        buckets.setdefault(cell, []).append(index)
+
+    groups = _DisjointSet(len(positions))
+    offsets = [(x, y, z) for x in (-1, 0, 1) for y in (-1, 0, 1) for z in (-1, 0, 1)]
+    limit = tolerance * tolerance
+    for index, cell in enumerate(map(tuple, cells)):
+        for offset in offsets:
+            neighbours = buckets.get(
+                (cell[0] + offset[0], cell[1] + offset[1], cell[2] + offset[2])
+            )
+            if not neighbours:
+                continue
+            for other in neighbours:
+                if other > index:
+                    delta = positions[index] - positions[other]
+                    if float(delta @ delta) <= limit:
+                        groups.union(index, other)
+
+    roots = np.asarray([groups.find(i) for i in range(len(positions))], dtype=np.int64)
+    unique_roots, inverse = np.unique(roots, return_inverse=True)
+    return _by_first_appearance(positions, inverse.reshape(-1), len(unique_roots), average=True)
+
+
+def _by_first_appearance(
+    positions: FloatArray, inverse: IndexArray, count: int, average: bool = False
+) -> tuple[FloatArray, IndexArray]:
+    """Renumber welded groups so group ``k`` is the ``k``-th to appear.
+
+    ``np.unique`` numbers its groups in sorted order, which would permute a
+    caller's vertices for no reason a caller can see. ``average`` places a group
+    at the mean of its members, which is what a tolerance weld wants; an exact
+    weld has nothing to average.
+    """
+    inverse = np.asarray(inverse, dtype=np.int64)
+    first_member = np.full(count, len(positions), dtype=np.int64)
+    np.minimum.at(first_member, inverse, np.arange(len(positions), dtype=np.int64))
+    order = np.argsort(first_member)
+    relabel = np.empty(count, dtype=np.int64)
+    relabel[order] = np.arange(count, dtype=np.int64)
+    renumbered = relabel[inverse]
+
+    if not average:
+        return positions[first_member[order]], renumbered
+    points = np.zeros((count, 3), dtype='d')
+    members = np.bincount(renumbered, minlength=count).astype('d')
+    for axis in range(3):
+        points[:, axis] = (
+            np.bincount(renumbered, weights=positions[:, axis], minlength=count) / members
+        )
+    return points, renumbered
+
+
+class Topology:
+    """A welded surface, its adjacency, and the faces still alive on it.
+
+    ``positions`` are the welded points and are moved in place by a collapse;
+    ``faces`` holds position indices and ``corners`` the vertex each of those
+    came from, so an attribute follows its corner rather than its point.
+    """
+
+    def __init__(
+        self,
+        positions: FloatArray,
+        faces: IndexArray,
+        corners: IndexArray,
+        vertex_point: IndexArray,
+    ) -> None:
+        self.positions = np.ascontiguousarray(positions, dtype='d')
+        self.faces = np.ascontiguousarray(faces, dtype=np.int64)
+        self.corners = np.ascontiguousarray(corners, dtype=np.int64)
+        #: Which welded point each *input* vertex went to.
+        self.vertex_point = np.ascontiguousarray(vertex_point, dtype=np.int64)
+        #: False once a collapse has removed the face.
+        self.alive = np.ones(len(self.faces), dtype=bool)
+        self.vertex_faces: list[set[int]] = [set() for _ in range(len(self.positions))]
+        for index, face in enumerate(self.faces):
+            for point in face:
+                self.vertex_faces[point].add(index)
+
+    @property
+    def vertex_count(self) -> int:
+        """How many welded points the surface has."""
+        return len(self.positions)
+
+    @property
+    def face_count(self) -> int:
+        """How many triangles are still alive."""
+        return int(np.count_nonzero(self.alive))
+
+    def neighbours(self, point: int) -> set[int]:
+        """The points joined to ``point`` by a live triangle."""
+        found: set[int] = set()
+        for face in self.vertex_faces[point]:
+            found.update(int(v) for v in self.faces[face])
+        found.discard(point)
+        return found
+
+    def edge_faces(self, left: int, right: int) -> set[int]:
+        """The live faces using both ends of an edge."""
+        return self.vertex_faces[left] & self.vertex_faces[right]
+
+    def is_boundary_edge(self, left: int, right: int) -> bool:
+        """True where exactly one face uses the edge, so the surface stops there."""
+        return len(self.edge_faces(left, right)) == 1
+
+    def live_faces(self) -> IndexArray:
+        """The face array with the dead rows removed."""
+        return self.faces[self.alive]
+
+    def edges(self) -> IndexArray:
+        """Every distinct undirected edge of the live surface, as ``(e, 2)``."""
+        faces = self.live_faces()
+        pairs = np.concatenate([faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]], axis=0)
+        pairs = np.sort(pairs, axis=1)
+        return np.unique(pairs, axis=0)
+
+    def classify(
+        self,
+        lock_boundary: bool = False,
+        locked: IndexArray | None = None,
+    ) -> np.ndarray:
+        """What each point may do, as an array of :class:`VertexClass`.
+
+        ``lock_boundary`` holds the surface's border where it is, which is what a
+        cluster group's simplification needs so its neighbours still meet it.
+        ``locked`` names further points to hold.
+        """
+        kinds = np.full(self.vertex_count, VertexClass.MANIFOLD, dtype=np.int8)
+        faces = self.live_faces()
+        if len(faces):
+            pairs = np.concatenate([faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]], axis=0)
+            pairs = np.sort(pairs, axis=1)
+            edges, counts = np.unique(pairs, axis=0, return_counts=True)
+
+            over = edges[counts > 2].reshape(-1)
+            kinds[over] = VertexClass.LOCKED
+
+            border_ends = edges[counts == 1].reshape(-1)
+            border_count = np.bincount(border_ends, minlength=self.vertex_count)
+            # A point on a well-formed border has exactly two border edges. More
+            # than two is a pinch: two sheets meeting at a point, which no single
+            # placement can serve.
+            kinds[border_count == 2] = np.where(
+                kinds[border_count == 2] == VertexClass.LOCKED,
+                VertexClass.LOCKED,
+                VertexClass.BORDER,
+            )
+            kinds[border_count > 2] = VertexClass.LOCKED
+
+            kinds[self._multi_fan_points(faces, edges, counts)] = VertexClass.LOCKED
+
+        used = np.zeros(self.vertex_count, dtype=bool)
+        used[faces.reshape(-1)] = True
+        kinds[~used] = VertexClass.LOCKED
+
+        if lock_boundary:
+            kinds[kinds == VertexClass.BORDER] = VertexClass.LOCKED
+        if locked is not None:
+            kinds[np.asarray(locked, dtype=np.int64)] = VertexClass.LOCKED
+        return kinds
+
+    def _multi_fan_points(
+        self, faces: IndexArray, edges: IndexArray, counts: np.ndarray
+    ) -> IndexArray:
+        """Points whose faces form more than one fan -- a bowtie.
+
+        Corners are joined across every interior edge; a point whose corners end
+        up in more than one group is being shared by sheets that only touch.
+        """
+        corner_of = {}
+        for face_index, face in enumerate(faces):
+            for slot, point in enumerate(face):
+                corner_of[(int(point), face_index)] = face_index * 3 + slot
+
+        groups = _DisjointSet(len(faces) * 3)
+        face_lookup: dict[tuple[int, int], list[int]] = {}
+        for face_index, face in enumerate(faces):
+            for left, right in ((0, 1), (1, 2), (2, 0)):
+                key = (int(min(face[left], face[right])), int(max(face[left], face[right])))
+                face_lookup.setdefault(key, []).append(face_index)
+
+        for edge, count in zip(edges, counts, strict=True):
+            if count != 2:
+                continue
+            first, second = face_lookup[(int(edge[0]), int(edge[1]))]
+            for point in edge:
+                groups.union(corner_of[(int(point), first)], corner_of[(int(point), second)])
+
+        seen: dict[int, set[int]] = {}
+        for (point, _face), corner in corner_of.items():
+            seen.setdefault(point, set()).add(groups.find(corner))
+        return np.asarray(
+            [point for point, roots in seen.items() if len(roots) > 1], dtype=np.int64
+        )
+
+
+def build(positions: FloatArray, indices: IndexArray, tolerance: float = 0.0) -> Topology:
+    """A :class:`Topology` from the arrays a caller holds.
+
+    Vertices sharing a position are welded, and a triangle left with a repeated
+    corner by that welding is dropped: it covers no area, so it describes no
+    surface and its plane is undefined.
+    """
+    positions = np.asarray(positions)
+    if positions.ndim != 2 or positions.shape[1] != 3:
+        raise DecimateError('positions must be (n, 3), got %r' % (positions.shape,))
+    flat = np.asarray(indices).reshape(-1)
+    if len(flat) % 3:
+        raise DecimateError('indices must be a multiple of three, got %d' % (len(flat),))
+    corners = flat.reshape(-1, 3).astype(np.int64)
+    if len(flat) and (int(corners.min()) < 0 or int(corners.max()) >= len(positions)):
+        raise DecimateError(
+            'index out of range: %d vertices, indices up to %d'
+            % (len(positions), int(corners.max()))
+        )
+
+    points, vertex_point = weld_positions(positions, tolerance)
+    faces = vertex_point[corners]
+    usable = (
+        (faces[:, 0] != faces[:, 1]) & (faces[:, 1] != faces[:, 2]) & (faces[:, 0] != faces[:, 2])
+    )
+    return Topology(points, faces[usable], corners[usable], vertex_point)
