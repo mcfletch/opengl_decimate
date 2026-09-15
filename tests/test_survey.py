@@ -1,0 +1,125 @@
+"""Asking a mesh how far it will go before spending a reduction on it.
+
+Some models cannot be decimated, and the reason is always a property of the
+model rather than of the reducer. A canopy of separate leaf cards has as many
+pieces as cards and every piece keeps a triangle; a scan of lace has a handle
+through every hole and no contraction closes one; an atlas of thousands of small
+charts is mostly seam. A caller who knows which of those they have knows whether
+to reach for a reduction or for a different tool.
+"""
+
+import numpy as np
+import shapes
+
+from opengl_decimate import survey
+
+
+def _cards(count=50, seed=0):
+    """Loose quads, no two sharing a vertex -- what a leaf canopy welds to."""
+    rng = np.random.default_rng(seed)
+    centres = rng.uniform(-10.0, 10.0, size=(count, 3))
+    corner = np.array([(-1.0, -1.0, 0.0), (1.0, -1.0, 0.0), (1.0, 1.0, 0.0), (-1.0, 1.0, 0.0)])
+    positions = (centres[:, None, :] + corner[None, :, :]).reshape(-1, 3).astype('f4')
+    base = 4 * np.arange(count)[:, None]
+    faces = np.concatenate(
+        [base + np.array([[0, 1, 2]]), base + np.array([[0, 2, 3]])], axis=0
+    ).astype(np.uint32)
+    return {'POSITION': positions}, faces.reshape(-1)
+
+
+def _torus(around=24, across=12, big=3.0, small=1.0):
+    """One closed surface with one handle through it."""
+    angle = np.arange(around) * (2.0 * np.pi / around)
+    ring = np.arange(across) * (2.0 * np.pi / across)
+    grid_u, grid_v = np.meshgrid(angle, ring, indexing='ij')
+    radius = big + small * np.cos(grid_v)
+    positions = np.stack(
+        [radius * np.cos(grid_u), small * np.sin(grid_v), radius * np.sin(grid_u)], axis=-1
+    ).reshape(-1, 3)
+    index = np.arange(around * across).reshape(around, across)
+    right, down = np.roll(index, -1, axis=0), np.roll(index, -1, axis=1)
+    faces = np.concatenate(
+        [
+            np.stack([index, right, np.roll(right, -1, axis=1)], axis=-1).reshape(-1, 3),
+            np.stack([index, np.roll(right, -1, axis=1), down], axis=-1).reshape(-1, 3),
+        ]
+    )
+    return {'POSITION': positions.astype('f4')}, faces.reshape(-1).astype(np.uint32)
+
+
+class TestWhatStopsAReduction:
+    def test_a_closed_shell_can_go_to_four_triangles_and_no_further(self):
+        attributes = {'POSITION': shapes.icosphere(3)[0]}
+        report = survey(attributes, shapes.icosphere(3)[1])
+        assert report.pieces == 1
+        assert report.handles == 0
+        assert report.open_pieces == 0
+        assert report.floor == 4
+
+    def test_a_torus_is_one_piece_with_one_handle(self):
+        attributes, indices = _torus()
+        report = survey(attributes, indices)
+        assert report.pieces == 1
+        assert report.handles == 1
+
+    def test_loose_cards_keep_a_triangle_each(self):
+        """The canopy case: as many pieces as cards, and no reduction touches them.
+
+        Each card is its own component with its own border, so the floor is the
+        number of cards -- decimation cannot take a canopy below the count of
+        the leaves in it, whatever target it is given.
+        """
+        attributes, indices = _cards(50)
+        report = survey(attributes, indices)
+        assert report.pieces == 50
+        assert report.open_pieces == 50
+        assert report.floor == 50
+        assert report.reducible < 0.6
+
+    def test_a_welded_surface_is_reducible(self):
+        attributes = {'POSITION': shapes.grid(17)[0]}
+        report = survey(attributes, shapes.grid(17)[1])
+        assert report.pieces == 1
+        assert report.floor == 1
+        assert report.reducible > 0.99
+
+    def test_a_seam_is_counted_and_a_plain_mesh_has_none(self):
+        """A chart boundary is a duplicated vertex, not merely a jump in uv.
+
+        Two vertices at one position carrying different coordinates is what
+        makes a seam; one vertex whose coordinate happens to differ from its
+        neighbour's is just a texture.
+        """
+        positions, indices = shapes.grid(9)
+        uv = ((positions[:, [0, 2]] + 1.0) * 0.5).astype('f4')
+        assert survey({'POSITION': positions, 'TEXCOORD_0': uv}, indices).seam_share == 0.0
+
+        faces = np.asarray(indices, dtype=np.int64).reshape(-1, 3)
+        right = positions[:, 0] > 0.0
+        copy_of = np.arange(len(positions)) + len(positions)
+        doubled = np.concatenate([positions, positions])
+        charts = np.concatenate([uv, uv + np.array([10.0, 0.0], dtype='f4')])
+        moved = right[faces].all(axis=1)
+        faces[moved] = copy_of[faces[moved]]
+        seamed = {'POSITION': doubled, 'TEXCOORD_0': charts}
+        assert survey(seamed, faces.reshape(-1).astype(np.uint32)).seam_share > 0.0
+
+    def test_welding_is_what_the_answer_is_about(self):
+        """The counts describe the welded surface, not the vertex soup.
+
+        Two cards written with separate vertices but placed edge to edge are one
+        piece once welded, and a triangle that welding leaves with a repeated
+        corner covers no area, so it is not one of the triangles there is to
+        reduce.
+        """
+        corner = np.array([(-1.0, -1.0, 0.0), (1.0, -1.0, 0.0), (1.0, 1.0, 0.0), (-1.0, 1.0, 0.0)])
+        joined = np.concatenate([corner, corner + np.array([2.0, 0.0, 0.0])]).astype('f4')
+        # A sliver: two of its corners are the same place, so welding drops it.
+        sliver = np.array([(-1.0, -1.0, 0.0), (-1.0, -1.0, 0.0), (1.0, 1.0, 0.0)], dtype='f4')
+        positions = np.concatenate([joined, sliver])
+        faces = np.array([(0, 1, 2), (0, 2, 3), (4, 5, 6), (4, 6, 7), (8, 9, 10)], dtype=np.uint32)
+        report = survey({'POSITION': positions}, faces.reshape(-1))
+        assert report.triangles == 5
+        assert report.welded_away == 1
+        assert report.pieces == 1
+        assert report.points == 6

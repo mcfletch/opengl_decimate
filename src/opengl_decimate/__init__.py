@@ -24,6 +24,7 @@ answers without decimating again.
 from opengl_decimate.options import SimplifyOptions
 from opengl_decimate.sequence import CollapseSequence, SimplifyResult
 from opengl_decimate.simplify import collapse_sequence, simplify
+from opengl_decimate.survey import Survey, survey
 from opengl_decimate.types import DecimateError
 
 __version__ = '0.1.0a1'
@@ -36,6 +37,9 @@ __all__ = [
     # Recording a reduction, so any target is reachable without re-running it
     'collapse_sequence',
     'CollapseSequence',
+    # Asking how far one will go before spending it
+    'survey',
+    'Survey',
     # Refusing one
     'DecimateError',
     '__version__',

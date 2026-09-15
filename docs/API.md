@@ -21,6 +21,33 @@ so `options` may be left out entirely where the defaults will do. They are what
 `CollapseSequence.at` is asked for afterwards. This is the call to make once when
 a model is loaded.
 
+## `survey(attributes, indices) -> Survey`
+
+Measure what would stop a reduction of this mesh, without running one. Takes the
+same arrays as `simplify`; reads texture coordinates where they are there, to
+find the atlas seams, and nothing else.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `triangles` | `int` | triangles handed in |
+| `points` | `int` | distinct positions they cover, once welded |
+| `welded_away` | `int` | triangles welding dropped for leaving with a repeated corner |
+| `pieces` | `int` | connected pieces of surface |
+| `open_pieces` | `int` | how many of those have a border |
+| `largest_piece` | `int` | triangles in the largest, which is the subject where the rest are specks |
+| `handles` | `int` | tunnels through the surface, from Euler's formula |
+| `seam_share` | `float` | share of edges whose ends are drawn at different numbers of texture coordinates — what `preserve_seams` refuses |
+| `floor` | `int` | the fewest triangles any reduction can reach: one per open piece, four per closed one. A lower bound from the pieces alone; handles and seams push the real floor above it |
+| `reducible` | `float` | the share of the triangles a reduction could in principle remove. One for a model nothing stops, near zero for a canopy of leaf cards |
+
+```python
+from opengl_decimate import survey
+
+report = survey(attributes, indices)
+if report.reducible < 0.5:
+    ...  # decimation will not get you where you are going
+```
+
 ## `SimplifyOptions`
 
 A frozen dataclass. At least one target is required; where more than one is

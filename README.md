@@ -95,6 +95,23 @@ directions and measures the worst place either is from the other — which is th
 number a level of detail's error bound should be built on, and runs about twice
 `result.error`. One direction alone cannot see a hole.
 
+**How far a model will go, before spending a reduction on it.** Some meshes
+cannot be decimated, and the reason is always a property of the mesh: a canopy
+of separate leaf cards is as many pieces as it has cards and every piece keeps a
+triangle; lace has a handle through every hole, and no contraction closes one;
+an atlas of thousands of small charts is mostly seam. `survey` measures all
+three and puts a floor on what any target can reach.
+
+```python
+from opengl_decimate import survey
+
+report = survey(attributes, indices)
+report.pieces, report.handles, report.seam_share
+report.floor                                 # no target goes below this
+if report.reducible < 0.5:
+    ...  # this model wants a different operation, not a lower target
+```
+
 ## Targets
 
 At least one, and the reduction stops at whichever is reached first.
