@@ -74,6 +74,12 @@ opengl_decimate = ["py.typed"]
 # a file whose module is already imported from somewhere else.
 testpaths = ["tests", "src"]
 addopts = "-ra --doctest-modules --import-mode=importlib"
+# `tests/shapes.py` holds the meshes the suite is written against, and is
+# imported by name. The `importlib` import mode above deliberately does not put
+# a test file's directory on `sys.path` -- that is what makes it safe against an
+# installed copy of the package -- so the one directory that has to be there is
+# named here rather than left to whichever way pytest was invoked.
+pythonpath = ["tests"]
 
 [tool.ruff]
 line-length = 100
