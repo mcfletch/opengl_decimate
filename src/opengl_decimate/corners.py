@@ -45,9 +45,10 @@ from opengl_decimate.types import POSITION, FloatArray, IndexArray
 
 __all__ = ['corner_moves', 'copies_per_point', 'follow']
 
-#: Corners matched against their candidates in one block, so a model whose
-#: points carry many copies cannot ask for an arbitrarily large intermediate.
-_BLOCK = 1 << 16
+#: Values in one block of the candidate match -- corners times copies times the
+#: width of a row -- so a model whose points carry many copies cannot ask for an
+#: arbitrarily large intermediate. Eight bytes each, so this is about 4 MB.
+_BLOCK = 1 << 19
 
 
 def corner_moves(
@@ -108,8 +109,14 @@ def corner_moves(
     key = _attribute_key(attributes, len(vertex_point))
     split = np.flatnonzero(counts[kept] > 1)
     if key is not None and len(split):
-        for block in range(0, len(split), _BLOCK):
-            rows = split[block : block + _BLOCK]
+        # Each corner is compared against a row padded out to the widest point
+        # in its block, so the block is sized in values rather than in rows: a
+        # model that draws one position a hundred times would otherwise ask for
+        # a hundred times the intermediate.
+        widest = max(1, int(counts[kept[split]].max()) * key.shape[1])
+        block = max(1, _BLOCK // widest)
+        for first in range(0, len(split), block):
+            rows = split[first : first + block]
             moved_to[rows] = _nearest_copy(key, order, start, kept[rows], moved[rows])
 
     return moved, moved_to, step_start
