@@ -26,7 +26,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
+import subprocess
 import sys
 import time
 import urllib.request
@@ -50,32 +52,39 @@ CACHE = os.environ.get(
 #: Raw URLs for the images, so the README renders on PyPI as well as on GitHub.
 RAW = 'https://raw.githubusercontent.com/mcfletch/opengl_decimate/main/docs/gallery'
 
-#: Where the camera sits, in radii of the model's own bounding sphere, measured
-#: from its centre. ``1.0`` is touching that sphere, which is as close as a view
-#: of the whole object gets; past that the range runs out to a smudge, which is
-#: where a renderer stops being able to tell one level from another.
-DISTANCES = (1.02, 1.5, 2.5, 5.0, 14.0, 40.0)
+#: ``oglc-view`` frames a model by putting a sphere of its radius across the
+#: field of view, which is this many radii back at margin one. The probe is told
+#: a distance directly, so it needs the same number to agree with the captures.
+FIT = 2.6
 
-#: What a game's *ordinary* finest level wants. A scan hands over a million
-#: triangles and a renderer with a world to draw will not spend them on one
-#: prop at arm's length, let alone on forty of them.
-#:
-#: The source above it is still worth keeping, and worth looking at here: it is
-#: the level for standing right next to the thing and looking into the
-#: crevices, which is exactly the case the coarser rungs cannot serve and the
-#: case a player puts to a model perhaps once.
-HIGH = 10_000
+#: A bundled CC0 studio HDRI, so a level is lit the way an asset is looked at
+#: rather than by one lamp in the dark.
+ENVIRONMENT = 'studio_small_03'
 
-#: The coarsest mesh worth drawing. Past this an imposter -- a billboard of the
-#: thing -- is cheaper than any triangles, so the chain stops here.
-FLOOR = 120
+#: The chain a game would actually ship, in triangles. Past the top of it a
+#: renderer with a world to draw is not going to spend the triangles on one
+#: prop however close the player stands, and below the bottom an imposter -- a
+#: billboard of the thing -- costs less than any mesh.
+LEVELS = (32_000, 8_000, 4_000, 2_000, 1_000, 500)
 
-#: Rungs between :data:`HIGH` and :data:`FLOOR`, and between the source and
-#: :data:`HIGH` where the source is far above it. Geometric either way, so each
-#: step is the same proportion of the one above and two subjects' sheets read
-#: side by side.
-RUNGS = 6
-APPROACH = 2
+#: Screen-space error a level is placed at: the distance where its measured
+#: deviation from the source projects to this many pixels. One pixel is the
+#: rule a streaming renderer uses, and it is the honest answer to "how far away
+#: does this level have to be", because a length in model units means nothing
+#: until it is turned into pixels.
+SSE_PIXELS = 1.0
+
+#: The camera's vertical field of view, matching ``LODProbe`` and the viewer.
+FOVY = 45.0
+
+#: The closest anything is drawn, in radii beyond the surface. The source and
+#: the finest level are both drawn here, so the reference and the top of the
+#: chain can be compared directly; a level whose screen-space error puts it
+#: nearer than this is usable right up to the object.
+NEAREST = 0.25
+
+#: And the furthest, past which the object is a smudge whatever it is made of.
+FURTHEST = 32.0
 
 #: Pixels per cell in a contact sheet.
 CELL = 256
@@ -93,9 +102,13 @@ class Subject:
     #: ``polyhaven:<asset>`` to fetch, or a path relative to the workspace root.
     source: str
     credit: str
-    #: Degrees about Y, chosen so the model faces the camera.
+    #: Degrees about Y, chosen so the model faces the camera. The probe is told
+    #: degrees and ``oglc-view`` radians, so this is converted at each call
+    #: rather than kept twice.
     rotation: float = 0.0
     note: str = ''
+    #: Components below this share of the model's diagonal go before reducing.
+    drop_components_below: float = 0.0
 
 
 SUBJECTS = (
@@ -129,11 +142,13 @@ SUBJECTS = (
         note=(
             'A museum scan exported as twenty-five primitives, each stopping at the '
             '65,535 vertices a 16-bit index can name -- so the reduction sees one '
-            'surface only because the primitives are merged and welded first. It is '
-            'also 664 separate shells: the birds, and hundreds of specks the '
-            'photogrammetry left behind. Each shell has a floor of its own, which is '
-            'why this chain stops where it does rather than at the coarsest rung.'
+            'surface only because the primitives are merged and welded first. Nine '
+            'of its thirteen components are specks the photogrammetry left behind, '
+            'and `drop_components_below` takes them: 572 triangles, which is fifteen '
+            'per cent of what the coarsest rung has to spend. It is the atlas that '
+            'stops this chain, not the specks -- see **Where a chain stops** below.'
         ),
+        drop_components_below=0.01,
     ),
     Subject(
         slug='rocks',
@@ -177,6 +192,17 @@ SUBJECTS = (
 
 
 @dataclass
+class Group:
+    """One material's share of a subject, and the reduction recorded for it."""
+
+    material: Any
+    attributes: dict
+    indices: Any
+    source_triangles: int
+    sequence: Any
+
+
+@dataclass
 class Level:
     """One rung: what it holds, what it cost to make, what it costs to draw."""
 
@@ -188,6 +214,17 @@ class Level:
     replay_ms: float
     draw_ms: float = 0.0
     fps: float = 0.0
+    #: Radii beyond the surface at which this level's deviation is worth one
+    #: pixel -- the distance a renderer would switch to it at.
+    safe_at: float = float('inf')
+    #: What the swap does to the picture there, from the engine's measurement:
+    #: the share of the object's pixels whose outline moved, and whose shading
+    #: changed.
+    outline: float = 0.0
+    shading: float = 0.0
+    #: Where it is actually drawn in the gallery: its safe distance, or
+    #: :data:`NEAREST` for the finest level and the source.
+    shown_at: float = NEAREST
     note: str = ''
     images: dict = field(default_factory=dict)
 
@@ -200,6 +237,7 @@ class Reduction:
     source_triangles: int
     source_vertices: int
     primitives: int
+    materials: int
     welded_points: int
     load_s: float
     reduce_s: float
@@ -211,6 +249,65 @@ class Reduction:
     #: Where the reduction ran out of legal contractions, if it did before the
     #: ladder did.
     floor: int = 0
+    #: Connected pieces the welded source is in, handles through them, and the
+    #: share of its edges an atlas seam holds -- see :func:`shape_of`. Between
+    #: them they say where a floor comes from.
+    pieces: int = 0
+    handles: int = 0
+    seam_share: float = 0.0
+    groups: list = field(default_factory=list)
+    #: Materials already written out with external textures, by the id of the
+    #: material they came from, so a subject's maps are written once.
+    textures: dict = field(default_factory=dict)
+
+
+def shape_of(groups: list) -> tuple[int, int, float]:
+    """Pieces, handles, and the share of edges a seam holds.
+
+    The three reasons a chain stops, and they are properties of the model rather
+    than of the reducer.
+
+    Euler's formula gives the first two: a closed surface of ``p`` pieces and
+    ``g`` handles has ``V - E + F = 2p - 2g``. Pieces are separable -- the small
+    ones are what ``drop_components_below`` takes. Handles are not: contracting
+    an edge under the link condition preserves the surface's topology by
+    construction, so a tunnel cannot be closed by any number of contractions and
+    each one costs the triangles it takes to go round it. A scan of feathers or
+    foliage arrives with hundreds.
+
+    The third is the texture atlas. An edge whose ends are drawn at different
+    numbers of texture coordinates runs off a seam into a chart, and
+    ``preserve_seams`` refuses it; where the atlas is thousands of small charts,
+    most of the model's edges are that edge.
+    """
+    from opengl_decimate import corners, topology
+
+    pieces = handles = 0
+    held = total = 0
+    for group in groups:
+        mesh = group.sequence
+        faces = mesh.faces
+        if not len(faces):
+            continue
+        used = np.unique(faces)
+        edges = np.unique(
+            np.sort(np.concatenate([faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]]), axis=1),
+            axis=0,
+        )
+        # Every point gets a label, an unused one its own, so only the labels of
+        # points some triangle uses are components of the surface.
+        labelled = topology.components(faces, len(mesh.points))
+        parts = len(np.unique(labelled[used]))
+        characteristic = len(used) - len(edges) + len(faces)
+        pieces += parts
+        handles += max(0, (2 * parts - characteristic) // 2)
+
+        copies = corners.copies_per_point(
+            mesh.vertex_point, mesh.corners, group.attributes, len(mesh.points)
+        )
+        held += int(np.count_nonzero(copies[edges[:, 0]] != copies[edges[:, 1]]))
+        total += len(edges)
+    return pieces, handles, (held / total if total else 0.0)
 
 
 def peak_rss_mb() -> float:
@@ -262,53 +359,46 @@ def _save(url: str, path: str) -> str:
     return path
 
 
-def load(path: str) -> tuple[dict, Any, int]:
-    """One model as a single merged mesh, with how many primitives it was."""
-    from OpenGLContext.loaders.assets import merged_mesh, shapes
+def load(path: str) -> tuple[list, int]:
+    """A model as one merged mesh per material, and how many primitives it was.
+
+    Grouped rather than merged whole, because a level has to be *drawn*: a mesh
+    draws with one material, so that is as far as the pieces can be brought
+    together without losing what the model looks like.
+    """
+    from OpenGLContext.loaders.assets import merged_by_material, shapes
     from OpenGLContext.loaders.gltf import load_gltf
 
     scene = load_gltf(path, max_resource_bytes=None)
-    merged = merged_mesh(scene.group)
-    if merged is None:
+    grouped = merged_by_material(scene.group)
+    if not grouped:
         raise SystemExit('%s holds no triangles' % (path,))
-    attributes, indices = merged
-    return attributes, indices, sum(1 for _ in shapes(scene.group))
-
-
-def _between(top: int, bottom: int, rungs: int) -> list:
-    """``rungs`` counts descending from just below ``top`` to ``bottom``."""
-    if top <= bottom or rungs < 1:
-        return []
-    step = (bottom / top) ** (1.0 / rungs)
-    counts, count = [], float(top)
-    for _ in range(rungs):
-        count *= step
-        counts.append(max(bottom, round(count)))
-    return counts
+    return grouped, sum(1 for _ in shapes(scene.group))
 
 
 def ladder(triangles: int) -> list:
     """``(triangles, note)`` for each level, the source first.
 
-    The span a renderer spends most of its time in is :data:`HIGH` -- what an
-    ordinary finest level can afford -- down to :data:`FLOOR`, where an imposter
-    takes over, and most of the rungs walk it. The source sits above that as the
-    level to swap in when somebody walks up to the thing, and a couple of rungs
-    cover the descent from it.
+    A fixed chain rather than a share of the source, because what a renderer can
+    afford is a triangle count and not a proportion: thirty-two thousand is
+    thirty-two thousand whether the scan arrived with two hundred thousand
+    triangles or two million.
+
+    The source rides above the chain as a reference. It is not a level anything
+    would ship -- past the top of the chain a renderer with a world to draw is
+    not spending the triangles on one prop -- but it is the picture the rest are
+    judged against.
     """
-    levels = [(triangles, 'walk up to it')]
-    if triangles > HIGH:
-        levels += [(count, '') for count in _between(triangles, HIGH, APPROACH)[:-1]]
-        levels.append((HIGH, "a game's ordinary finest"))
-    top = min(triangles, HIGH)
-    levels += [(count, '') for count in _between(top, FLOOR, RUNGS)]
-    if levels[-1][0] <= FLOOR:
+    levels = [(triangles, 'the source, for reference')]
+    levels += [(count, '') for count in LEVELS if count < triangles]
+    if len(levels) > 1:
+        levels[1] = (levels[1][0], 'the finest a game would ship')
         levels[-1] = (levels[-1][0], 'past here, an imposter')
     return levels
 
 
 def reduce_subject(subject: Subject, certify: bool) -> Reduction:
-    """Decimate one subject once, and read every level off the recording."""
+    """Decimate one subject once per material, and read every level off it."""
     from OpenGLContext.meshlod.chain import bounding_sphere
 
     from opengl_decimate import SimplifyOptions, collapse_sequence, topology
@@ -317,53 +407,81 @@ def reduce_subject(subject: Subject, certify: bool) -> Reduction:
     print('== %s ==' % (subject.title,), flush=True)
     path = fetch(subject.source)
     start = time.perf_counter()
-    attributes, indices, primitives = load(path)
+    grouped, primitives = load(path)
     load_s = time.perf_counter() - start
 
-    source_triangles = len(indices) // 3
-    welded = topology.build(attributes['POSITION'], indices)
+    options = SimplifyOptions(target_ratio=1.0, drop_components_below=subject.drop_components_below)
+    source_triangles = sum(len(indices) // 3 for _m, _a, indices in grouped)
+    welded = sum(
+        topology.build(
+            attributes['POSITION'], indices, 0.0, options.drop_components_below
+        ).vertex_count
+        for _m, attributes, indices in grouped
+    )
     print(
-        '   %s triangles in %d primitive%s, welded to %s points'
+        '   %s triangles in %d primitive%s over %d material%s, welded to %s points'
         % (
             f'{source_triangles:,}',
             primitives,
             '' if primitives == 1 else 's',
-            f'{welded.vertex_count:,}',
+            len(grouped),
+            '' if len(grouped) == 1 else 's',
+            f'{welded:,}',
         ),
         flush=True,
     )
 
-    # One reduction. Every rung below is a prefix replay of this recording,
-    # which is the whole point of `collapse_sequence`.
+    # One reduction per material. Every rung below is a prefix replay of those
+    # recordings, which is the whole point of `collapse_sequence`.
     start = time.perf_counter()
-    sequence = collapse_sequence(attributes, indices, SimplifyOptions(target_ratio=1.0))
+    groups = [
+        Group(
+            material=material,
+            attributes=attributes,
+            indices=indices,
+            source_triangles=len(indices) // 3,
+            sequence=collapse_sequence(attributes, indices, options),
+        )
+        for material, attributes, indices in grouped
+    ]
     reduce_s = time.perf_counter() - start
+    contractions = sum(len(group.sequence) for group in groups)
     print(
-        '   reduced in %.1f s, %s contractions recorded' % (reduce_s, f'{len(sequence):,}'),
+        '   reduced in %.1f s, %s contractions recorded' % (reduce_s, f'{contractions:,}'),
         flush=True,
     )
 
-    centre, radius = bounding_sphere(attributes['POSITION'])
+    whole = np.concatenate([group.attributes['POSITION'] for group in groups])
+    centre, radius = bounding_sphere(whole)
     out = Reduction(
         subject=subject,
         source_triangles=source_triangles,
-        source_vertices=len(attributes['POSITION']),
+        source_vertices=len(whole),
         primitives=primitives,
-        welded_points=welded.vertex_count,
+        materials=len(groups),
+        welded_points=welded,
         load_s=load_s,
         reduce_s=reduce_s,
-        contractions=len(sequence),
+        contractions=contractions,
         peak_mb=peak_rss_mb(),
         radius=float(radius),
         centre=centre,
+        groups=groups,
     )
+    out.pieces, out.handles, out.seam_share = shape_of(groups)
 
-    original = np.asarray(attributes['POSITION'], dtype='d')
     for index, (count, note) in enumerate(ladder(source_triangles)):
         start = time.perf_counter()
-        result = sequence.at(target_count=count)
+        # A target is shared out across the materials in proportion to what each
+        # brought, so one level is one triangle budget for the whole model.
+        share = count / max(1, source_triangles)
+        results = [
+            group.sequence.at(target_count=max(4, round(group.source_triangles * share)))
+            for group in groups
+        ]
         replay_ms = (time.perf_counter() - start) * 1000.0
-        if out.levels and result.triangle_count >= out.levels[-1].triangles:
+        triangles = sum(result.triangle_count for result in results)
+        if out.levels and triangles >= out.levels[-1].triangles:
             # The reduction has run out of legal contractions, and every rung
             # below this one would be the same mesh again. Where a subject stops
             # and why is worth a row; nine copies of it are not.
@@ -372,75 +490,277 @@ def reduce_subject(subject: Subject, certify: bool) -> Reduction:
             break
         measured = None
         if certify and index:
-            measured = certification.surface_deviation(
-                original,
-                indices,
-                result.attributes['POSITION'],
-                result.indices,
-                samples=4000,
-            ).max
+            measured = max(
+                certification.surface_deviation(
+                    group.attributes['POSITION'],
+                    group.indices,
+                    result.attributes['POSITION'],
+                    result.indices,
+                    samples=4000,
+                ).max
+                for group, result in zip(groups, results, strict=True)
+            )
         out.levels.append(
             Level(
                 index=index,
-                triangles=result.triangle_count,
-                vertices=len(result.attributes['POSITION']),
-                error=result.error,
+                triangles=triangles,
+                vertices=sum(len(r.attributes['POSITION']) for r in results),
+                error=max(result.error for result in results),
                 measured=measured,
                 replay_ms=replay_ms,
                 note=note,
             )
         )
-        out.levels[-1].result = result  # type: ignore[attr-defined]
+        out.levels[-1].results = results  # type: ignore[attr-defined]
         print(
             '   level %d: %9s triangles  error %.5f  replay %6.1f ms'
-            % (index, f'{result.triangle_count:,}', result.error, replay_ms),
+            % (index, f'{triangles:,}', out.levels[-1].error, replay_ms),
             flush=True,
         )
     out.peak_mb = peak_rss_mb()
     return out
 
 
-def render_subject(reduction: Reduction, probe: Any) -> None:
-    """Draw every level at every distance, and time each one."""
-    from OpenGLContext import capture
+#: Which texture channels hold colour rather than measurements, and so are
+#: written as sRGB.
+COLOUR_CHANNELS = ('baseColor', 'emissive', 'sheenColor', 'specularColor')
+
+
+def externalise(material: Any, where: str, slug: str, seen: dict) -> Any:
+    """A copy of ``material`` whose textures are files beside the document.
+
+    The writer embeds a texture into every document that names one, re-encoded
+    as PNG -- so a subject's seven levels would carry seven copies of its maps,
+    and a museum scan's came to four hundred megabytes apiece. Written once and
+    named by relative ``uri``, the levels hold geometry and nothing else.
+    """
+    import copy
+
+    from OpenGLContext.loaders.gltf.writer import ExternalImage
+
+    if material is None:
+        return None
+    key = id(material)
+    if key in seen:
+        return seen[key]
+    swapped = {}
+    for channel, texture in (getattr(material, 'textures', None) or {}).items():
+        image = getattr(texture, 'image', None)
+        if image is None:
+            continue
+        name = '%s-%d-%s.png' % (slug, len(seen), channel)
+        path = os.path.join(where, name)
+        if not os.path.exists(path):
+            image.save(path)
+        swapped[channel] = ExternalImage(uri=name, srgb=channel in COLOUR_CHANNELS)
+    copied = copy.copy(material)
+    copied.textures = swapped
+    seen[key] = copied
+    return copied
+
+
+def write_level(reduction: Reduction, level: Level, where: str) -> str:
+    """One level as a ``.glb``, its materials naming textures written beside it."""
+    from OpenGLContext.loaders.gltf.writer import SceneNode, write_glb
+    from OpenGLContext.scenegraph.pbrmesh import PBRMesh
+
+    built = []
+    for group, result in zip(reduction.groups, level.results, strict=True):
+        if not result.triangle_count:
+            continue
+        built.append(
+            PBRMesh(
+                positions=result.attributes['POSITION'],
+                normals=result.attributes.get('NORMAL'),
+                texcoords=result.attributes.get('TEXCOORD_0'),
+                indices=result.indices,
+                material=externalise(
+                    group.material, where, reduction.subject.slug, reduction.textures
+                ),
+            )
+        )
+    path = os.path.join(where, '%s-l%d.glb' % (reduction.subject.slug, level.index))
+    write_glb([SceneNode(mesh=built)], path)
+    return path
+
+
+def capture(model: str, png: str, yaw: float, margin: float, size: int) -> bool:
+    """Draw a level the way the engine draws it: materials, textures and all.
+
+    Through ``oglc-view`` rather than the bare probe, because what this row of
+    the gallery answers is *what does it look like* -- and the answer to that
+    involves the material as much as the geometry. The probe's flat shading is
+    the other row, where the triangles are the subject.
+    """
+    run = subprocess.run(
+        [
+            sys.executable,
+            '-m',
+            'OpenGLContext.bin.view',
+            model,
+            '--capture',
+            png,
+            '--size',
+            '%dx%d' % (size, size),
+            '--yaw',
+            '%g' % (yaw,),
+            '--margin',
+            '%g' % (margin,),
+            '--no-rotate',
+            '--no-cameras',
+            '--no-shadows',
+            '--frames',
+            '6',
+            '--environment',
+            ENVIRONMENT,
+        ],
+        capture_output=True,
+        text=True,
+        env={**os.environ, 'OPENGLCONTEXT_HIDDEN': '1', 'OPENGLCONTEXT_NO_VSYNC': '1'},
+    )
+    if run.returncode or not os.path.exists(png):
+        print('   drawing %s failed: %s' % (os.path.basename(png), run.stderr[-300:]), flush=True)
+        return False
+    return True
+
+
+def merged_level(level: Level) -> tuple:
+    """One level's material groups as a single ``(positions, normals, indices)``.
+
+    For measuring and for the triangle view, where the materials are not the
+    question and one array pair is easier to hand to the probe.
+    """
+    import numpy as np
+
+    positions = np.concatenate([result.attributes['POSITION'] for result in level.results])
+    normals = np.concatenate([result.attributes['NORMAL'] for result in level.results])
+    offset, joined = 0, []
+    for result in level.results:
+        joined.append(np.asarray(result.indices).reshape(-1) + offset)
+        offset += len(result.attributes['POSITION'])
+    return positions, normals, np.concatenate(joined).astype(np.uint32)
+
+
+def serving_distance(deviation: float, radius: float) -> float:
+    """Where a level's error is worth one pixel, in radii beyond the surface.
+
+    A level's deviation is a length in model units, and a length says nothing
+    about whether anyone can see it. What decides is how many pixels it covers,
+    which is the distance: a camera of vertical field ``FOVY`` rendering to
+    ``CELL`` pixels sees ``2 * distance * tan(FOVY / 2) / CELL`` model units per
+    pixel, so the error is worth :data:`SSE_PIXELS` at
+
+        distance = deviation * CELL / (SSE_PIXELS * 2 * tan(FOVY / 2))
+
+    This is the rule a streaming renderer switches on, and it is what puts each
+    level in this gallery where a game would have chosen it.
+    """
+    per_pixel = 2.0 * math.tan(math.radians(FOVY) / 2.0) / CELL
+    distance = deviation / max(per_pixel * SSE_PIXELS, 1e-12)
+    return distance / max(radius, 1e-12) - 1.0
+
+
+def choose_distances(reduction: Reduction, probe: Any) -> None:
+    """Place each level where a renderer would, and measure what it costs there.
+
+    Placement is screen-space error -- see :func:`serving_distance`. What the
+    swap actually does to the picture is then measured at that distance by the
+    engine's own machinery, split into the outline that moved and the shading
+    that changed, because the two want different remedies: a moved outline needs
+    triangles, changed shading needs a normal map.
+    """
+    from OpenGLContext.meshlod.quality import pop_breakdown
+
+    source = merged_level(reduction.levels[0])
+    # A chain has to be ordered: a coarser level is never usable closer than a
+    # finer one, whatever a sampled deviation happened to measure. Taking the
+    # running maximum is what a renderer needs to switch on.
+    furthest = 0.0
+    for index, level in enumerate(reduction.levels):
+        deviation = level.measured if level.measured is not None else level.error
+        furthest = max(furthest, serving_distance(deviation, reduction.radius))
+        level.safe_at = furthest
+        if index <= 1:
+            level.shown_at = NEAREST
+        else:
+            level.shown_at = min(FURTHEST, max(NEAREST, level.safe_at))
+        if index == 0:
+            level.safe_at = 0.0
+            continue
+        positions, normals, indices = merged_level(level)
+        at = (1.0 + level.shown_at) * reduction.radius
+        before = probe.render(
+            source[0],
+            source[1],
+            source[2],
+            at,
+            reduction.radius,
+            reduction.centre,
+            rotation=reduction.subject.rotation,
+        )
+        after = probe.render(
+            positions,
+            normals,
+            indices,
+            at,
+            reduction.radius,
+            reduction.centre,
+            rotation=reduction.subject.rotation,
+        )
+        level.outline, level.shading = pop_breakdown(before, after)
+        print(
+            '   level %d: one pixel past %.1f radii, drawn at %.2f; outline %.2f%%,'
+            ' shading %.1f%%'
+            % (index, level.safe_at, level.shown_at, 100 * level.outline, 100 * level.shading),
+            flush=True,
+        )
+
+
+def render_subject(reduction: Reduction, probe: Any, models: str) -> None:
+    """Draw every level twice: as the game would, and as triangles."""
+    from OpenGLContext import capture as capturing
 
     subject = reduction.subject
     os.makedirs(PICTURES, exist_ok=True)
+    choose_distances(reduction, probe)
     for level in reduction.levels:
-        result = level.result
-        positions = result.attributes['POSITION']
-        normals = result.attributes.get('NORMAL')
-        close = DISTANCES[0] * reduction.radius
-        for label, edges in (('shaded', False), ('edges', True)):
-            image = probe.render(
-                positions,
-                normals,
-                result.indices,
-                close,
-                reduction.radius,
-                reduction.centre,
-                rotation=subject.rotation,
-                edges=edges,
-            )
-            name = '%s-l%d-%s.png' % (subject.slug, level.index, label)
-            capture.save_png(os.path.join(PICTURES, name), image)
-            level.images[label] = name
-        level.images['distance'] = []
-        for step in DISTANCES:
-            image = probe.render(
-                positions,
-                normals,
-                result.indices,
-                step * reduction.radius,
-                reduction.radius,
-                reduction.centre,
-                rotation=subject.rotation,
-            )
-            level.images['distance'].append(image)
+        name = '%s-l%d' % (subject.slug, level.index)
+        model = write_level(reduction, level, models)
+        # Two textured views of the same level. Close up, so the levels can be
+        # compared with each other and with the source; and at the distance a
+        # renderer would have switched to this level, where how *small* it is is
+        # the answer rather than an accident of framing.
+        for key, where in (('shaded', NEAREST), ('served', level.shown_at)):
+            png = '%s-%s.png' % (name, key)
+            if capture(
+                model,
+                os.path.join(PICTURES, png),
+                math.radians(subject.rotation),
+                (1.0 + where) / FIT,
+                CELL,
+            ):
+                level.images[key] = png
+
+        # And the same level's triangles, close up and flat, whatever distance
+        # it is used at -- which is the point of putting them side by side.
+        positions, normals, indices = merged_level(level)
+        close = (1.0 + NEAREST) * reduction.radius
+        image = probe.render(
+            positions,
+            normals,
+            indices,
+            close,
+            reduction.radius,
+            reduction.centre,
+            rotation=subject.rotation,
+            edges=True,
+        )
+        capturing.save_png(os.path.join(PICTURES, name + '-edges.png'), image)
+        level.images['edges'] = name + '-edges.png'
         cost = probe.frame_cost(
             positions,
             normals,
-            result.indices,
+            indices,
             close,
             reduction.radius,
             reduction.centre,
@@ -454,41 +774,31 @@ def render_subject(reduction: Reduction, probe: Any) -> None:
         )
 
 
-def sheets(reduction: Reduction) -> dict:
-    """Lay the renders out as two contact sheets; return their file names."""
-    from OpenGLContext import contactsheet
+def _read(path: str) -> Any:
+    """A written PNG back as an ``(n, n, 3)`` array, for the contact sheet."""
+    import numpy as np
     from OpenGLContext.capture import ensure_pillow
 
-    subject = reduction.subject
-    written = {}
-    if ensure_pillow() is None:
-        return written
-
-    rows = [
-        ('%s tri' % f'{level.triangles:,}', level.images['distance']) for level in reduction.levels
-    ]
-    columns = ['%g r' % step for step in DISTANCES]
-    path = os.path.join(PICTURES, '%s-distance.png' % (subject.slug,))
-    contactsheet.tile(
-        path, '%s -- every level, close to barely visible' % (subject.title,), rows, columns
-    )
-    written['distance'] = os.path.basename(path)
-    return written
+    image = ensure_pillow()
+    if image is None:
+        return np.zeros((CELL, CELL, 3), dtype=np.uint8)
+    return np.asarray(image.open(path).convert('RGB'))
 
 
 def table(reduction: Reduction) -> str:
     """The measurements for one subject, as a markdown table."""
     lines = [
-        '| Level | Triangles | Of source | `result.error` | Measured | Replay | Draw | Frame rate | |',
-        '|---|---:|---:|---:|---:|---:|---:|---:|---|',
+        '| Triangles | Of source | `result.error` | Measured | Replay | Draw | Frame rate'
+        ' | One pixel past | Outline | Shading |',
+        '|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|',
     ]
     for level in reduction.levels:
         share = level.triangles / max(1, reduction.source_triangles)
         lines.append(
-            '| %d | %s | %s | %.5f | %s | %.0f ms | %.2f ms | %s | %s |'
+            '| %s%s | %s | %.5f | %s | %.0f ms | %.2f ms | %s | %s | %s | %s |'
             % (
-                level.index,
                 f'{level.triangles:,}',
+                ' *(%s)*' % (level.note,) if level.note else '',
                 (
                     'source'
                     if level.index == 0
@@ -501,28 +811,55 @@ def table(reduction: Reduction) -> str:
                 level.replay_ms,
                 level.draw_ms,
                 '--' if not level.fps else f'{level.fps:,.0f}',
-                '**%s**' % (level.note,) if level.note else '',
+                '--' if level.index == 0 else '%.1f r' % (level.safe_at,),
+                '--' if level.index == 0 else '%.2f%%' % (100 * level.outline,),
+                '--' if level.index == 0 else '%.1f%%' % (100 * level.shading,),
             )
         )
     return '\n'.join(lines)
 
 
-def _strip(reduction: Reduction, kind: str, width: int) -> str:
-    """One row of a subject's levels, each captioned with its triangle count."""
-    cells = ''.join(
-        '<td align="center"><img src="gallery/%s" width="%d" alt="%s at %s triangles">'
-        '<br><sub><b>%s</b> tri%s</sub></td>'
-        % (
-            level.images.get(kind, ''),
-            width,
-            reduction.subject.title,
-            f'{level.triangles:,}',
-            f'{level.triangles:,}',
-            '<br>%s' % (level.note,) if level.note else '',
+def rows(reduction: Reduction) -> str:
+    """One row per level: what a player sees, and the triangles behind it."""
+    out = [
+        '<table>',
+        '<tr><th align="left">Level</th><th align="left">Close up</th>'
+        '<th align="left">Where it is used</th>'
+        '<th align="left">Its triangles</th></tr>',
+    ]
+    for level in reduction.levels:
+        if level.index == 0:
+            said = 'the source, drawn where the finest level is'
+        else:
+            said = (
+                'one pixel of error past <b>%.1f radii</b><br>drawn there;'
+                ' outline %.2f%%, shading %.1f%%'
+                % (level.safe_at, 100 * level.outline, 100 * level.shading)
+            )
+        out.append(
+            '<tr><td valign="top" width="140"><b>%s</b> tri<br><sub>%s%s</sub></td>'
+            '<td><img src="gallery/%s" width="250" alt="%s at %s triangles"></td>'
+            '<td><img src="gallery/%s" width="250" alt="%s at %s triangles, %s radii away">'
+            '</td>'
+            '<td><img src="gallery/%s" width="250" alt="%s triangles of %s"></td></tr>'
+            % (
+                f'{level.triangles:,}',
+                ('<b>%s</b><br>' % (level.note,)) if level.note else '',
+                said,
+                level.images.get('shaded', ''),
+                reduction.subject.title,
+                f'{level.triangles:,}',
+                level.images.get('served', ''),
+                reduction.subject.title,
+                f'{level.triangles:,}',
+                '%.1f' % (level.shown_at,),
+                level.images.get('edges', ''),
+                f'{level.triangles:,}',
+                reduction.subject.title,
+            )
         )
-        for level in reduction.levels
-    )
-    return '<table><tr>%s</tr></table>' % (cells,)
+    out.append('</table>')
+    return '\n'.join(out)
 
 
 def page(reductions: list, described: str) -> str:
@@ -547,14 +884,35 @@ def page(reductions: list, described: str) -> str:
         ' seconds and each level in milliseconds -- see'
         ' [`collapse_sequence`](API.md#collapse_sequenceattributes-indices-optionsnone---collapsesequence).',
         '',
-        'The chain each subject is cut into is the one a renderer wants rather'
-        ' than an even split of the source. The **source** stays at the top: it'
-        ' is the level to swap in when somebody walks up to the thing and looks'
-        ' into the crevices, and nothing coarser can serve that. Below it,'
-        ' **%s triangles** is what an ordinary finest level can afford when'
-        ' there is a world to draw as well, and the rungs walk from there down'
-        ' to **%s**, past which an imposter costs less than any mesh.'
-        % (f'{HIGH:,}', f'{FLOOR:,}'),
+        'The chain is the one a game would ship -- %s triangles -- rather than a'
+        ' share of whatever the scan happened to arrive with. What a renderer can'
+        ' afford is a count, not a proportion. The source sits above it as a'
+        ' reference: not a level anything would draw, but the picture the rest'
+        ' are judged against.' % (', '.join(f'{count:,}' for count in LEVELS),),
+        '',
+        '**Each level is drawn where a renderer would have chosen it.** The rule'
+        ' is screen-space error: a level is placed at the distance where its'
+        ' *measured* deviation from the source projects to **one pixel**, which'
+        ' is what a streaming renderer switches on. A length in model units says'
+        ' nothing about whether anyone can see it; a pixel does.',
+        '',
+        "Three views of each level. **Close up** is the level with the model's"
+        ' own materials and textures, lit by a CC0 studio environment, at %g'
+        ' radii -- the same distance for every level and for the source, so they'
+        ' can be compared with each other. **Where it is used** is the same level'
+        ' at the distance the rule above puts it, in the same frame: how small it'
+        ' is there is the answer, not an accident of framing. **Its triangles** is'
+        ' the level close up again, flat-shaded with its edges on, so what the'
+        ' decimation did is visible beside what it produced.' % (NEAREST,),
+        '',
+        "The **outline** and **shading** figures are the engine's own measurement"
+        ' of the swap where it is drawn:'
+        ' [`pop_breakdown`](../../openglcontext/OpenGLContext/meshlod/quality.py)'
+        " splits the share of the object's pixels that change into the part whose"
+        ' outline moved and the part that merely shaded differently. The two want'
+        ' different remedies -- a moved outline needs triangles, changed shading'
+        ' needs a normal map baked from the fine mesh -- and one number for both'
+        ' would hide which is happening.',
         '',
         "- **`result.error`** is the reducer's own figure: an area-weighted"
         ' root-mean-square distance to the planes it has been through, not a bound.',
@@ -569,12 +927,9 @@ def page(reductions: list, described: str) -> str:
         ' a monitor allowed. It is one object on an idle card: read the ratios'
         ' between the rows, not the absolute rate.' % (CELL, CELL, FRAMES),
         '',
-        "The distance sheets put the camera from %g to %g radii of the model's"
-        ' own bounding sphere away from its centre -- %g being as close as a view'
-        ' of the whole object gets. The rightmost column is the object at the'
-        ' size it covers when a renderer is deciding whether anyone would'
-        ' notice, and the point of the sheet is how far left you have to read'
-        ' before the rows stop agreeing.' % (DISTANCES[0], DISTANCES[-1], DISTANCES[0]),
+        "Distances are in radii of the model's own bounding sphere, measured"
+        ' beyond its surface: %g is close enough to fill the view, %g is far'
+        ' enough that the object is a smudge.' % (NEAREST, FURTHEST),
         '',
     ]
     for reduction in reductions:
@@ -586,12 +941,14 @@ def page(reductions: list, described: str) -> str:
             '',
             '| | |',
             '|---|---|',
-            '| Source | %s triangles, %s vertices, %d primitive%s |'
+            '| Source | %s triangles, %s vertices, %d primitive%s over %d material%s |'
             % (
                 f'{reduction.source_triangles:,}',
                 f'{reduction.source_vertices:,}',
                 reduction.primitives,
                 '' if reduction.primitives == 1 else 's',
+                reduction.materials,
+                '' if reduction.materials == 1 else 's',
             ),
             '| Welded to | %s points |' % (f'{reduction.welded_points:,}',),
             '| Reduced in | %.1f s, %s contractions |'
@@ -609,24 +966,90 @@ def page(reductions: list, described: str) -> str:
             table(reduction),
             '',
         ]
-        out += ['### What it looks like', '', _strip(reduction, 'shaded', 240), '']
+        out += [rows(reduction), '']
+    out += closing(reductions)
+    return '\n'.join(out) + '\n'
+
+
+def closing(reductions: list) -> list:
+    """What the tables above do not say: where a chain stops, and on what box."""
+    stopped = [r for r in reductions if r.floor]
+    out = [
+        '## Where a chain stops',
+        '',
+        'Some subjects above run out of ladder before they run out of rungs. A'
+        ' reduction stops where no contraction is left that keeps the surface a'
+        ' surface, and two properties of the *model* decide where that is.',
+        '',
+        '**Pieces.** Every connected piece reduces on its own and each has a'
+        ' floor of its own -- a closed shell cannot go below four triangles --'
+        ' so a scan that arrived with the subject and two hundred crumbs spends'
+        ' four triangles on each crumb however coarse a target it is given.'
+        ' `drop_components_below` takes the pieces smaller than a given share of'
+        " the model's diagonal, and never the largest.",
+        '',
+        '**Handles.** A tunnel through the surface cannot be closed at all.'
+        ' Contracting an edge under the link condition preserves topology by'
+        ' construction -- that is what the condition is for -- so every handle'
+        ' survives to the end and costs the triangles it takes to go round it.'
+        ' A scan of feathers, foliage or lace arrives with hundreds, and no'
+        ' option in this package will remove one: closing a tunnel is a'
+        ' different operation from contracting an edge.',
+        '',
+        '**Seams.** `preserve_seams` holds the boundaries of the texture atlas,'
+        ' so a seam shortens along its own line rather than wandering into the'
+        ' middle of a chart and drawing a band of the image across it. Where the'
+        ' atlas is a few large charts this costs nothing. Where it is thousands'
+        ' of small ones the seam network is most of what a reduction has left,'
+        ' and the chain stops on it -- which is the honest answer for that'
+        ' asset, because the levels below it would not be the model any more.'
+        ' The share of edges a seam holds is the number to look at.',
+        '',
+    ]
+    out += [
+        '| Subject | Pieces | Handles | Edges held by a seam | Floor |',
+        '|---|---:|---:|---:|---:|',
+    ]
+    out += [
+        '| %s | %s | %s | %.1f%% | %s |'
+        % (
+            r.subject.title,
+            f'{r.pieces:,}',
+            f'{r.handles:,}',
+            100.0 * r.seam_share,
+            ('%s tri' % (f'{r.floor:,}',)) if r.floor else 'reached the bottom of the chain',
+        )
+        for r in reductions
+    ]
+    out += ['']
+    if stopped:
         out += [
-            '<details><summary>and the triangles producing it</summary>',
-            '',
-            _strip(reduction, 'edges', 240),
-            '',
-            '</details>',
+            'A subject that stops is not a subject the reducer gave up on: every'
+            ' contraction left would have cost the model one of the three'
+            ' properties above. What such an asset needs is a different'
+            ' operation -- an imposter, a re-authored atlas, foliage baked to'
+            ' larger cards -- rather than a lower target.',
             '',
         ]
-        if reduction.sheet.get('distance'):
-            out += [
-                '### Close to barely visible',
-                '',
-                '![%s at every level and distance](gallery/%s)'
-                % (subject.title, reduction.sheet['distance']),
-                '',
-            ]
-    return '\n'.join(out) + '\n'
+    out += [
+        '## What this box is',
+        '',
+        'The draw times and frame rates above are one machine. It is a fast one,'
+        ' and a reader sizing a budget for players should read the *ratios*'
+        ' between the rows rather than the absolute numbers: what a level costs'
+        ' relative to the one above it is a property of the triangles, and it'
+        ' carries across hardware. The rate does not.',
+        '',
+        'Where a GPU is fast enough, per-triangle cost stops being what the'
+        ' frame is made of: below some count the draw is bounded by fixed'
+        ' per-call work and the times flatten out, so the coarsest rungs look'
+        ' free. On an integrated part, or a phone, they are not -- the curve'
+        ' keeps falling, and the rungs this page shows as indistinguishable are'
+        ' the difference between a frame and a stutter. Size a chain against the'
+        ' slowest machine meant to draw it.',
+        '',
+    ]
+    return out
 
 
 #: The subject the README leads with, and the levels it shows.
@@ -675,12 +1098,12 @@ def readme_block(reductions: list) -> str:
         '',
     ]
     lines += [
-        '| Subject | Source | Reduced in | Draw at source | Draw at %s |' % (f'{HIGH:,}',),
+        '| Subject | Source | Reduced in | Draw at source | Draw at %s |' % (f'{LEVELS[0]:,}',),
         '|---|---:|---:|---:|---:|',
     ]
     for reduction in reductions:
         fine = next(
-            (lvl for lvl in reduction.levels if lvl.triangles <= HIGH), reduction.levels[-1]
+            (lvl for lvl in reduction.levels if lvl.triangles <= LEVELS[0]), reduction.levels[-1]
         )
         lines.append(
             '| %s | %s tri | %.1f s | %.2f ms | %.2f ms |'
@@ -767,19 +1190,22 @@ def main(argv: list | None = None) -> int:
         from OpenGLContext.meshlod.quality import LODProbe
         from OpenGLContext.testing.glcontext import hidden_window
 
+        # Each level is written here as a glb so `oglc-view` can draw it with
+        # its own materials. They are a step on the way to the pictures, not
+        # something the repository wants, so they live in the cache.
+        models = os.path.join(CACHE, 'levels')
+        os.makedirs(models, exist_ok=True)
         with (
             hidden_window('opengl_decimate gallery', size=(64, 64), profile='core'),
             LODProbe(size=options.cell) as probe,
         ):
             for reduction in reductions:
                 print('== drawing %s ==' % (reduction.subject.title,), flush=True)
-                render_subject(reduction, probe)
-                reduction.sheet = sheets(reduction)  # type: ignore[attr-defined]
+                render_subject(reduction, probe, models)
     else:
         for reduction in reductions:
             for level in reduction.levels:
                 level.images.setdefault('edges', '')
-            reduction.sheet = {}  # type: ignore[attr-defined]
 
     whole = len(reductions) == len(SUBJECTS)
     os.makedirs(DOCS, exist_ok=True)

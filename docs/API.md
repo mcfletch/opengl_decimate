@@ -56,6 +56,7 @@ zero.
 | `max_normal_flip` | `float` | `90.0` | degrees a face's normal may turn before the contraction is refused |
 | `min_triangle_quality` | `float` | `0.0` | shape floor: 0 admits any shape, 1 only equilateral |
 | `placement` | `str` | `'optimal'` | `'optimal'` minimises the summed quadric; `'endpoint'` keeps whichever end of the edge costs less, so every output point is an input point |
+| `preserve_seams` | `bool` | `True` | hold the boundaries of the texture atlas: a point drawn at several texture coordinates merges only with a point drawn at the same number, so a seam shortens along its own line instead of wandering into a chart. Where the atlas is a few large charts this costs nothing; where it is thousands of small ones the seam network is most of what is left and the reduction stops there rather than tearing the texture. Turn it off only where the target is coarse enough that the texture no longer carries the model |
 
 ### How it runs
 

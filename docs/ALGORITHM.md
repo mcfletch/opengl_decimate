@@ -24,10 +24,16 @@ Each point is then classified once:
   (faces forming more than one fan around one point), an isolated point, or a
   point the caller named.
 
-Each point is also counted: how many different sets of carried values the model
-draws it with. One almost everywhere; two where a texture seam, a shading crease
-or a material boundary runs, because those are one position the model draws
-twice. Step 4 uses the count.
+Each point is also counted: how many different **texture coordinates** the model
+draws it at. One almost everywhere; two where a seam runs, because a chart
+boundary is one position drawn twice, at the end of one chart and the start of
+the next. Step 4 uses the count.
+
+Texture coordinates and not the rest of what a corner carries, because they are
+the values that jump. A normal splits at a crease and the two sides differ by an
+angle, so taking the nearer of them is a small error in a direction; a chart
+boundary puts the two sides at unrelated ends of the texture, and taking either
+draws a band of the whole image across the triangles on the other side.
 
 The classification is computed once and stays true, because the rules in step 4
 admit only contractions that preserve the link of an edge, and those leave every
@@ -147,14 +153,21 @@ proposed placement, before and after. A normal that turns further than
 `max_normal_flip` has been folded over rather than moved, and the surface would
 render inside out there. A face that collapses to a line is refused outright.
 
-**No seam left without a copy to read.** A point the model draws more than once
-may merge only with a point drawn the same number of times. An edge running from
-a texture seam into the middle of a chart has two copies at one end and one at
-the other, and merging it would leave the triangles on the far side of the seam
-reading from this side of it — a band of texture drawn right across them. The
-seam can still shorten along its own length, which is where its triangles go;
-what it cannot do is wander off the line the author drew it on. This is the same
-shape of rule as the border one, for the same reason.
+**No seam left without a coordinate to read**, with `preserve_seams` on, which
+is the default. A point drawn at more than one texture coordinate may merge only
+with a point drawn at the same number. An edge running from a seam into the
+middle of a chart has two coordinates at one end and one at the other, and
+merging it would leave the triangles on the far side of the seam reading from
+this side of it. The seam can still shorten along its own length, which is where
+its triangles go; what it cannot do is wander off the line the author drew it
+on. This is the same shape of rule as the border one, for the same reason.
+
+It is also what decides how far a textured model goes. Where the atlas is a few
+large charts the rule costs nothing. Where it is thousands of small ones the
+seam network is most of what a reduction has left, and the chain stops there —
+which is the honest answer for that asset, since the alternative is a level
+whose texture no longer describes it. `preserve_seams=False` is for a target
+coarse enough that the texture has stopped carrying the model.
 
 **Shape, optionally.** `min_triangle_quality` refuses a contraction leaving a
 triangle thinner than a scale-free quality measure allows — four root three times

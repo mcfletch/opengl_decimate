@@ -87,6 +87,21 @@ class SimplifyOptions:
         target of a few hundred is spent on crumbs unless they go. ``0.01`` is
         about a pixel where the whole model covers a hundred. The largest piece
         is never dropped.
+    :param preserve_seams: hold the boundaries of the texture atlas. A point
+        drawn at several texture coordinates -- one position at the end of one
+        chart and the start of the next -- then merges only with a point drawn
+        at the same number, so a seam shortens along its own line and never
+        wanders into the middle of a chart. Off, a contraction across a seam
+        gives the merged point one side's coordinate and draws a band of the
+        whole image across the triangles on the other side.
+
+        This is what decides how far a textured model can go. Where the atlas
+        is a few large charts it costs nothing; where it is thousands of small
+        ones the seam network is most of what is left, and the reduction stops
+        there rather than tearing the texture. Turning it off is the right
+        answer where the target is coarse enough that the texture no longer
+        carries the model -- an imposter, or a level a few hundred triangles
+        across -- and the wrong one everywhere else.
     :param schedule: one of :data:`SCHEDULES`.
     :param candidates: how many edges ``multiple-choice`` samples per step.
     :param seed: fixes the sampling, so a run is reproducible.
@@ -119,6 +134,7 @@ class SimplifyOptions:
     placement: str = 'optimal'
     weld_tolerance: float = 0.0
     drop_components_below: float = 0.0
+    preserve_seams: bool = True
     schedule: str = 'heap'
     candidates: int = 8
     seed: int = 0

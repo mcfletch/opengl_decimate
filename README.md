@@ -66,11 +66,11 @@ hands the corners it merges to the end of the edge the merged point came to rest
 nearest, so a texture coordinate and a normal travel with the position they
 describe. Two corners at the same point with different normals or texture
 coordinates stay two vertices, so a UV seam is still a seam and a hard edge is
-still hard — and a point drawn more than once merges only with another drawn the
-same number of times, which keeps a seam on its own line instead of letting it
-wander into the middle of a chart. `recompute_normals` replaces `NORMAL` with
-the normals of the surface that is left, where carrying the input's is not what
-you want.
+still hard — and `preserve_seams` holds the boundaries of the texture atlas, so
+a seam shortens along its own line instead of wandering into the middle of a
+chart and drawing a band of the image across it. `recompute_normals` replaces
+`NORMAL` with the normals of the surface that is left, where carrying the
+input's is not what you want.
 
 **A recorded reduction, replayed to any target.** `collapse_sequence` runs the
 whole reduction once and records it; `at()` then reaches any triangle count by

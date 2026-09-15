@@ -120,24 +120,31 @@ def copies_per_point(
     attributes: dict[str, np.ndarray],
     point_count: int,
 ) -> IndexArray:
-    """How many different sets of values are drawn at each point.
+    """How many different texture coordinates are drawn at each point.
 
-    One almost everywhere. Two where a texture seam runs, or a shading crease,
-    or a material boundary: one position that the model draws twice because what
-    is carried there differs on each side. Vertices carrying identical values
-    count once however many times an exporter wrote them out, and vertices no
-    triangle uses do not count at all.
+    One almost everywhere; two where a seam runs, because a chart boundary is
+    one position the model draws twice, once at the end of one chart and once at
+    the start of the next. Vertices carrying the same coordinate count once
+    however many times an exporter wrote them out, and vertices no triangle uses
+    do not count at all.
 
-    This is what tells a reduction where its seams are --
-    :func:`~opengl_decimate.collapse.is_legal` lets a point that is drawn
-    several times die only into another drawn the same number of times, so a
-    seam shortens along its own length and never wanders off into a chart.
+    Texture coordinates and not the rest of what a corner carries, because they
+    are the values that **jump**. A normal splits at a crease and the two sides
+    differ by an angle; taking the nearer of them is a small error in a
+    direction. A chart boundary puts the two sides at unrelated ends of the
+    texture, and taking either draws a band of the whole image across the
+    triangles on the other side. So this is what
+    :func:`~opengl_decimate.collapse.is_legal` holds: a point drawn at several
+    coordinates dies only into another drawn at the same number, which shortens
+    a seam along its own length and never lets it wander off into a chart. A
+    crease is left to the metric, which is what it is for.
     """
     counted = np.zeros(point_count, dtype=np.int64)
     used = np.unique(np.asarray(corners, dtype=np.int64).reshape(-1))
     if not len(used):
         return counted
-    key = _attribute_key(attributes, len(np.asarray(vertex_point)))
+    mapped = {name: value for name, value in attributes.items() if name.startswith('TEXCOORD')}
+    key = _attribute_key(mapped, len(np.asarray(vertex_point)))
     point = np.asarray(vertex_point, dtype=np.int64)[used]
     if key is None:
         counted[np.unique(point)] = 1
