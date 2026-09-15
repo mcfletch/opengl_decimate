@@ -17,7 +17,7 @@ result = simplify(
 
 result.attributes['POSITION']   # (v, 3) float32
 result.indices                  # (t * 3,) uint32
-result.error                    # deviation from the input, in model units
+result.error                    # the quadrics' own estimate of the deviation
 result.vertex_map               # input vertex -> output vertex
 ```
 
@@ -49,9 +49,9 @@ the input's is not what you want.
 
 **A recorded reduction, replayed to any target.** `collapse_sequence` runs the
 whole reduction once and records it; `at()` then reaches any triangle count by
-replaying a prefix — four array operations, not another decimation. Asking for
-fifty targets in a row costs about what asking for one costs, which is what an
-editor's target slider needs.
+replaying a prefix — four array operations, not another decimation. A target
+costs a replay rather than a reduction, and costs the same however far along the
+sequence it is, which is what an editor's target slider needs.
 
 ```python
 from opengl_decimate import collapse_sequence
@@ -63,11 +63,12 @@ within = sequence.at(target_error=0.01)      # or by deviation
 ```
 
 **A measured error, not only an estimate.** `result.error` is what the quadrics
-predicted. Quadrics measure distance to *planes*, and planes extend past the
-triangles that made them, so the number drifts optimistic. `certify=True`, or
-`opengl_decimate.certify.surface_deviation`, samples both surfaces in both
-directions and measures what actually happened — which is the number a level of
-detail's error bound should be built on. One direction alone cannot see a hole.
+predicted: an area-weighted root-mean-square distance to the planes, which is the
+right thing to steer a reduction by and is not a bound on anything. `certify=True`,
+or `opengl_decimate.certify.surface_deviation`, samples both surfaces in both
+directions and measures the worst place either is from the other — which is the
+number a level of detail's error bound should be built on, and runs about twice
+`result.error`. One direction alone cannot see a hole.
 
 ## Targets
 
@@ -75,20 +76,20 @@ At least one, and the reduction stops at whichever is reached first.
 
 | Option | Meaning |
 |---|---|
-| `target_ratio` | share of the input triangles to keep, in `(0, 1]` |
+| `target_ratio` | share of the input triangles to keep, in `(0, 1]`. A share of what the caller handed in, whatever welding merged first |
 | `target_count` | triangles to stop at |
-| `target_error` | deviation to stop at, a length in model units |
+| `target_error` | deviation to stop at, a length in model units — the quadrics' estimate, not the measured deviation |
 
 ## Options
 
 | Option | Default | What it does |
 |---|---|---|
 | `metric` | `'quadric'` | `'probabilistic'` reads the surface as noisy samples |
-| `position_noise` | `0.0` | probabilistic: how far points are trusted, as a fraction of the bounding-box diagonal |
-| `normal_noise` | `0.0` | probabilistic: how far normals are trusted |
+| `position_noise` | `0.001` | probabilistic: how far points are trusted, as a fraction of the bounding-box diagonal. Raises the reported error; does not change what gets contracted |
+| `normal_noise` | `0.001` | probabilistic: how far normals are trusted. The term that conditions the solve, so this is the one that changes the reduction |
 | `boundary_weight` | `1.0` | how hard an open surface's edge is held |
 | `lock_boundary` | `False` | hold the border exactly |
-| `locked` | `None` | further points to hold, by index |
+| `locked` | `None` | further points to hold, indexed into the **welded points** — the caller's own vertex indices unless vertices were welded |
 | `max_normal_flip` | `90.0` | degrees a face's normal may turn |
 | `min_triangle_quality` | `0.0` | shape floor, 0 (any) to 1 (equilateral only) |
 | `placement` | `'optimal'` | `'endpoint'` keeps every point exactly where it was |
@@ -96,7 +97,7 @@ At least one, and the reduction stops at whichever is reached first.
 | `schedule` | `'heap'` | `'multiple-choice'` samples instead of ordering |
 | `candidates` | `8` | how many edges `multiple-choice` draws per step |
 | `seed` | `0` | fixes the sampling, so a run repeats exactly |
-| `recompute_normals` | `False` | recompute `NORMAL` for the surface that is left |
+| `recompute_normals` | `False` | recompute `NORMAL` for the surface that is left, adding it where the input had none |
 | `certify` | `False` | measure the deviation into `measured_error` |
 | `certify_samples` | `4000` | points taken from each surface when certifying |
 
@@ -125,16 +126,28 @@ refused, so a mesh with some bad places is reduced everywhere else.
 needs — the same corner reconstructed twice differs in the last several bits. The
 exact weld is one vectorised sort; a tolerance weld groups into cells and joins
 across the twenty-seven cells a point can have a partner in, and costs more.
+Pick a tolerance smaller than the typical spacing between points: the work is the
+number of pairs sharing a cell, so a tolerance that sweeps a cluster into one
+cell costs the square of that cluster's size.
+
+A model far from the origin is handled where it is. Quadrics are accumulated
+about the model's own bounding-box centre, so a georeferenced mesh at 6.4e6
+reduces to exactly what the same mesh at the origin does — and `POSITION` comes
+back in the float dtype it arrived in, since a `float32` ulp out there is half a
+metre.
 
 ## Limits
 
 - Attributes follow their corner and are not part of the error metric, so a
   texture can slide slightly where a point moves a long way. `placement='endpoint'`
   removes that entirely, at some cost in geometric accuracy.
-- Everything runs in Python and NumPy. The batch work — accumulating quadrics,
-  pricing candidates, replaying a prefix — is whole-array; the contraction loop
-  is not, so a reduction of a few hundred thousand triangles is minutes rather
-  than seconds.
+- Only the `heap` schedule has the compiled contraction loop. `multiple-choice`
+  runs the NumPy implementation whatever is installed, which is around thirty
+  times slower per face — worth knowing, since the schedule is otherwise the
+  scalable one of the two.
+- Where no compiler was available at install time the NumPy contraction loop is
+  used for both schedules. It is the same reduction and the same answer, at a
+  speed that suits a model rather than a scan. A wheel carries the compiled one.
 - **An open surface cannot be reduced past its own boundaries.** Each border loop
   has a floor of three vertices, so a mesh of many small open shells stops well
   above any target. A tree trunk with 246 branch stubs stops at 738 triangles

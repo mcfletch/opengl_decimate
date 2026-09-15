@@ -8,13 +8,18 @@ produced, and that asking fifty times costs about what asking once costs.
 """
 
 import itertools
-import time
+import sys
+import tracemalloc
 
 import numpy as np
 import pytest
 import shapes
 
-from opengl_decimate import SimplifyOptions, collapse_sequence, simplify
+from opengl_decimate import CollapseSequence, SimplifyOptions, collapse_sequence, simplify
+
+# `opengl_decimate.simplify` is the function, not the module: the package
+# re-exports it under that name, which shadows the submodule on the package.
+simplify_module = sys.modules['opengl_decimate.simplify']
 
 
 def _sphere(subdivisions=3):
@@ -28,11 +33,27 @@ class TestRecording:
         sequence = collapse_sequence(attributes, indices, SimplifyOptions(target_ratio=0.5))
         assert len(sequence) > 100
 
-    def test_the_targets_in_the_options_do_not_stop_it(self):
-        """It records the whole reduction; the target is asked for afterwards."""
+    @pytest.mark.parametrize(
+        'options',
+        [
+            pytest.param(SimplifyOptions(target_ratio=0.9), id='ratio'),
+            pytest.param(SimplifyOptions(target_count=1000), id='count'),
+            pytest.param(SimplifyOptions(target_error=0.002), id='error'),
+            pytest.param(None, id='none-given'),
+        ],
+    )
+    def test_no_target_in_the_options_stops_it(self, options):
+        """It records the whole reduction; the target is asked for afterwards.
+
+        An error budget is the one a caller reaches for most naturally here,
+        since at least one target has to be named to build the options at all --
+        and it used to be the one target the recording loops still honoured, so
+        every later ask came back unreduced.
+        """
         attributes, indices = _sphere()
-        stopped = collapse_sequence(attributes, indices, SimplifyOptions(target_ratio=0.9))
-        assert stopped.triangles_after(len(stopped)) < 0.1 * (len(indices) // 3)
+        recorded = collapse_sequence(attributes, indices, options)
+        assert recorded.triangles_after(len(recorded)) < 0.1 * (len(indices) // 3)
+        assert recorded.at(target_count=20).triangle_count <= 20
 
     def test_triangle_count_falls_all_the_way_along(self):
         attributes, indices = _sphere(2)
@@ -53,6 +74,35 @@ class TestRecording:
             {'POSITION': positions}, indices, SimplifyOptions(target_ratio=0.5)
         )
         assert sequence.at(target_count=8).error < 1e-6
+
+
+class TestBuildingOneByHand:
+    """`CollapseSequence` is a public dataclass, so its defaults have to work.
+
+    A caller holding a recorded reduction of their own -- read back from a file,
+    say -- constructs one directly, and everything the reduction would have
+    filled in has to have an answer.
+    """
+
+    def test_the_fields_a_reduction_fills_in_have_defaults(self):
+        positions, indices = shapes.tetrahedron()
+        faces = np.asarray(indices, dtype=np.int64).reshape(-1, 3)
+        empty = np.zeros(0, dtype=np.int64)
+        sequence = CollapseSequence(
+            points=positions.astype('d'),
+            faces=faces,
+            corners=faces,
+            vertex_point=np.arange(len(positions), dtype=np.int64),
+            attributes={'POSITION': positions},
+            dying=empty,
+            surviving=empty,
+            placement=np.zeros((0, 3), dtype='d'),
+            deviation=np.zeros(0, dtype='d'),
+            removed_at=np.full(len(faces), -1, dtype=np.int64),
+        )
+        assert sequence.origin.tolist() == [0.0, 0.0, 0.0]
+        assert sequence.input_faces == len(faces)
+        assert sequence.at().triangle_count == len(faces)
 
 
 class TestReplay:
@@ -121,19 +171,53 @@ class TestReplay:
 
 
 class TestReplayCost:
-    def test_a_slider_full_of_targets_costs_about_what_one_costs(self):
-        """The point of recording: a target is a prefix, not another reduction."""
+    """A target is a prefix replay, not another reduction.
+
+    Both halves are asserted without a clock -- what a run takes is a fact about
+    the machine, and a bound on it is a flake waiting for a loaded CI runner.
+    What the claim is really about is that no reduction happens and that nothing
+    accumulates, and both of those can be asked directly.
+    """
+
+    def test_asking_for_a_target_runs_no_reduction(self):
+        attributes, indices = _sphere(2)
+        sequence = collapse_sequence(attributes, indices)
+        reductions = []
+        original = simplify_module._Engine
+
+        class Counted(original):  # type: ignore[valid-type, misc]
+            def __init__(self, *args, **named):
+                reductions.append(1)
+                super().__init__(*args, **named)
+
+        simplify_module._Engine = Counted
+        try:
+            # The reduction the sequence was recorded with is the only one.
+            simplify(attributes, indices, SimplifyOptions(target_count=100))
+            assert len(reductions) == 1
+            for count in np.linspace(20, len(indices) // 3 - 20, 50).astype(int):
+                sequence.at(target_count=int(count))
+            assert len(reductions) == 1
+        finally:
+            simplify_module._Engine = original
+
+    def test_fifty_asks_in_a_row_allocate_what_one_does(self):
+        """Nothing is cached or held between asks, so a slider does not grow."""
         attributes, indices = _sphere(4)
-        sequence = collapse_sequence(attributes, indices, SimplifyOptions(target_ratio=0.5))
+        sequence = collapse_sequence(attributes, indices)
 
-        start = time.perf_counter()
-        sequence.at(target_count=2000)
-        one = time.perf_counter() - start
+        def peak_over(count):
+            tracemalloc.start()
+            try:
+                for _ in range(count):
+                    sequence.at(target_count=2000)
+                return tracemalloc.get_traced_memory()[1]
+            finally:
+                tracemalloc.stop()
 
-        targets = np.linspace(20, len(indices) // 3 - 20, 50).astype(int)
-        start = time.perf_counter()
-        for count in targets:
-            sequence.at(target_count=int(count))
-        fifty = time.perf_counter() - start
-
-        assert fifty < max(60.0 * one, 2.0)
+        one = peak_over(1)
+        fifty = peak_over(50)
+        assert fifty < 1.5 * one, 'fifty asks peaked at %.2f MB against %.2f MB for one' % (
+            fifty / 1e6,
+            one / 1e6,
+        )

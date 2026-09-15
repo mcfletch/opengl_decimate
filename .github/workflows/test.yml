@@ -20,6 +20,16 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14", "pypy-3.10"]
+        # Wheels are published for three platforms, so a pull request has to
+        # see all three. A full cross-product would be fifteen more jobs for
+        # what is one C compiler and one set of integer widths per platform, so
+        # each of the other two gets the row that also runs lint, types and the
+        # coverage floor.
+        include:
+          - os: windows-latest
+            python-version: "3.12"
+          - os: macos-latest
+            python-version: "3.12"
     steps:
       - uses: actions/checkout@v4
 
@@ -32,7 +42,9 @@ jobs:
 
       # tox-gh reads the [gh] table in tox.ini and runs the envs mapped to this
       # interpreter. The 3.12 row additionally runs `lint`, `typecheck` and
-      # `coverage`, so ruff, mypy and the 100% coverage floor gate a merge.
+      # `coverage`, so ruff, mypy and the coverage floors gate a merge; the 3.10
+      # row runs `oldest-numpy`, which is what holds the declared NumPy floor to
+      # being a promise rather than a guess.
       - name: Run tox
         run: tox
 
@@ -48,8 +60,18 @@ jobs:
           python-version: "3.10"
       - name: Build and install the sdist
         run: |
-          python -m pip install --upgrade pip build
+          python -m pip install --upgrade pip build pytest
           python -m build --sdist
           python -m pip install dist/*.tar.gz
       - name: Import it from somewhere that is not the checkout
         run: cd /tmp && python -c "import opengl_decimate as d; print(d.__version__)"
+      # Run the suite from *inside* the unpacked sdist rather than from the
+      # checkout beside it. Everything else here -- tox's `package = sdist`,
+      # cibuildwheel's `test-command` -- installs the sdist but then tests the
+      # checkout's `tests/`, so a file the sdist failed to carry is still on
+      # disk and the omission goes unseen.
+      - name: Run the suite from inside the unpacked sdist
+        run: |
+          mkdir -p "${RUNNER_TEMP}/unpacked"
+          tar -C "${RUNNER_TEMP}/unpacked" --strip-components=1 -xzf dist/*.tar.gz
+          cd "${RUNNER_TEMP}/unpacked" && python -m pytest -q tests -o addopts=

@@ -13,20 +13,28 @@ Neither is inherent. Here the same algorithm keeps:
 * the faces on a point as a doubly-linked list over a fixed pool of ``3F``
   incidences, so a point's faces are walked without allocating and a
   contraction moves them between lists in constant time;
-* the queue as three parallel arrays with a serial number for ties, so an entry
-  is twenty-four bytes rather than a tuple of boxed objects.
+* the queue as parallel arrays with a serial number for ties, so an entry is a
+  few dozen bytes rather than a tuple of boxed objects.
 
 Everything around the loop -- welding, classification, accumulating the
 quadrics, assembling the output -- stays in NumPy, where it is already whole-
 array work. This takes the mesh as arrays, mutates them in place, and hands
-back the log of what it did.
+back the log of what it did. The loop runs with the GIL released, so a
+reduction on a worker thread leaves the rest of the process at full speed.
 
-**Staleness without a second structure.** A contraction changes the price of
-exactly the edges touching the survivor, and those are re-priced and re-queued
-when it happens. So an entry popped later whose price no longer matches what it
-was queued at has been superseded by one already in the queue, and is dropped.
-No map from edge to version is needed, which is the other structure that would
-not fit.
+**Staleness without a map from edge to version.** A contraction changes the
+price of exactly the edges touching the survivor, and those are re-priced and
+re-queued when it happens. Rather than a version per *edge* -- a hash map the
+size of the queue, which is the structure that would not fit -- each *point*
+carries one, bumped when its quadric changes, and every queued entry names the
+two versions it was priced against. A pop whose versions have moved on has been
+superseded by an entry already in the queue, and is dropped.
+
+The NumPy path in :mod:`opengl_decimate.simplify` reaches the same order with a
+stamp per pair, which it can afford because it is not the path a scan goes
+through. The two agree because a pair is stale under one exactly when it is
+stale under the other: both are bumped by the same event, a contraction at one
+of the pair's ends.
 """
 
 import numpy as np
@@ -40,11 +48,56 @@ cnp.import_array()
 #: Below this a triangle has no meaningful normal. Matches ``collapse._TINY``.
 cdef double TINY = 1e-30
 
-#: Largest neighbourhood handled; a point on a sane surface has a handful of
-#: faces, and the buffers are sized for far more than that. An enum so it is a
-#: compile-time constant and can size a C array.
+# Anything counted here, and anything that has to bind to a NumPy ``int64``, is
+# ``cnp.int64_t`` rather than C ``long``. Windows is LLP64, where ``long`` is
+# thirty-two bits: a memoryview declared ``long[::1]`` carries a type descriptor
+# holding ``sizeof(long)``, and acquiring an ``int64`` buffer through it raises
+# ``Buffer dtype mismatch``. The counters would also wrap at two billion, which
+# a mesh large enough to need this reducer can reach.
+
+#: What a working buffer starts at. A point on an ordinary surface has a
+#: handful of faces, so this is already far more than most neighbourhoods need;
+#: a lathe pole or a fan-triangulated n-gon has as many as it has, and the
+#: buffer grows to meet it.
 cdef enum:
-    SCRATCH = 1024
+    SCRATCH = 64
+
+
+# A growable run of ints, reused by every candidate rather than reallocated.
+cdef struct IntPool:
+    int* data
+    Py_ssize_t capacity
+
+
+cdef int pool_reserve(IntPool* pool, Py_ssize_t wanted) noexcept nogil:
+    """Make room for ``wanted`` ints. 0 on success, -1 where there is no memory.
+
+    ``realloc`` returns NULL without freeing what it was asked to grow, so the
+    result is only adopted once it is known to be a block -- otherwise a failure
+    would lose the pool as well as the growth.
+    """
+    cdef Py_ssize_t size = pool.capacity
+    cdef int* grown
+    if wanted <= pool.capacity:
+        return 0
+    if size < 1:
+        size = 1
+    while size < wanted:
+        size *= 2
+    grown = <int*> realloc(pool.data, size * sizeof(int))
+    if grown == NULL:
+        return -1
+    pool.data = grown
+    pool.capacity = size
+    return 0
+
+
+cdef inline int pool_append(IntPool* pool, Py_ssize_t at, int value) noexcept nogil:
+    """Write ``value`` at ``at``, growing first. 0 on success, -1 out of memory."""
+    if at >= pool.capacity and pool_reserve(pool, at + 1) < 0:
+        return -1
+    pool.data[at] = value
+    return 0
 
 
 cdef struct Heap:
@@ -53,49 +106,64 @@ cdef struct Heap:
     int* right
     int* left_version
     int* right_version
-    long* serial
+    cnp.int64_t* serial
     Py_ssize_t size
     Py_ssize_t capacity
-    long counter
+    cnp.int64_t counter
 
 
 cdef int heap_init(Heap* heap, Py_ssize_t capacity) except -1:
+    heap.size = 0
+    heap.capacity = capacity
+    heap.counter = 0
+    # Set before anything is allocated, so a partial failure is something
+    # `heap_free` can be handed rather than a mix of blocks and stack rubbish.
+    heap.cost = NULL
+    heap.left = NULL
+    heap.right = NULL
+    heap.serial = NULL
+    heap.left_version = NULL
+    heap.right_version = NULL
     heap.cost = <double*> malloc(capacity * sizeof(double))
     heap.left = <int*> malloc(capacity * sizeof(int))
     heap.right = <int*> malloc(capacity * sizeof(int))
-    heap.serial = <long*> malloc(capacity * sizeof(long))
+    heap.serial = <cnp.int64_t*> malloc(capacity * sizeof(cnp.int64_t))
     heap.left_version = <int*> malloc(capacity * sizeof(int))
     heap.right_version = <int*> malloc(capacity * sizeof(int))
     if not heap.cost or not heap.left or not heap.right or not heap.serial \
             or not heap.left_version or not heap.right_version:
+        heap_free(heap)
         raise MemoryError('could not allocate the contraction queue')
-    heap.size = 0
-    heap.capacity = capacity
-    heap.counter = 0
     return 0
 
 
-cdef void heap_free(Heap* heap) noexcept:
+cdef void heap_free(Heap* heap) noexcept nogil:
     free(heap.cost)
     free(heap.left)
     free(heap.right)
     free(heap.serial)
     free(heap.left_version)
     free(heap.right_version)
+    heap.cost = NULL
+    heap.left = NULL
+    heap.right = NULL
+    heap.serial = NULL
+    heap.left_version = NULL
+    heap.right_version = NULL
 
 
-cdef inline bint heap_before(Heap* heap, Py_ssize_t a, Py_ssize_t b) noexcept:
+cdef inline bint heap_before(Heap* heap, Py_ssize_t a, Py_ssize_t b) noexcept nogil:
     """Cheaper first, and for equal prices the one queued first."""
     if heap.cost[a] != heap.cost[b]:
         return heap.cost[a] < heap.cost[b]
     return heap.serial[a] < heap.serial[b]
 
 
-cdef inline void heap_swap(Heap* heap, Py_ssize_t a, Py_ssize_t b) noexcept:
+cdef inline void heap_swap(Heap* heap, Py_ssize_t a, Py_ssize_t b) noexcept nogil:
     cdef double cost = heap.cost[a]
     cdef int left = heap.left[a], right = heap.right[a]
     cdef int left_version = heap.left_version[a], right_version = heap.right_version[a]
-    cdef long serial = heap.serial[a]
+    cdef cnp.int64_t serial = heap.serial[a]
     heap.cost[a] = heap.cost[b]; heap.left[a] = heap.left[b]
     heap.right[a] = heap.right[b]; heap.serial[a] = heap.serial[b]
     heap.left_version[a] = heap.left_version[b]
@@ -105,23 +173,51 @@ cdef inline void heap_swap(Heap* heap, Py_ssize_t a, Py_ssize_t b) noexcept:
     heap.left_version[b] = left_version; heap.right_version[b] = right_version
 
 
+cdef int heap_grow(Heap* heap) noexcept nogil:
+    """Double the queue. 0 on success, -1 where there is no memory.
+
+    Each block is grown through a temporary and only adopted once it is one: a
+    failed ``realloc`` returns NULL and leaves the original allocated, so
+    assigning the result straight back would lose the queue it was growing.
+    """
+    cdef Py_ssize_t wanted = heap.capacity * 2
+    cdef double* cost
+    cdef int* pointer
+    cdef cnp.int64_t* serial
+    cost = <double*> realloc(heap.cost, wanted * sizeof(double))
+    if cost == NULL:
+        return -1
+    heap.cost = cost
+    pointer = <int*> realloc(heap.left, wanted * sizeof(int))
+    if pointer == NULL:
+        return -1
+    heap.left = pointer
+    pointer = <int*> realloc(heap.right, wanted * sizeof(int))
+    if pointer == NULL:
+        return -1
+    heap.right = pointer
+    serial = <cnp.int64_t*> realloc(heap.serial, wanted * sizeof(cnp.int64_t))
+    if serial == NULL:
+        return -1
+    heap.serial = serial
+    pointer = <int*> realloc(heap.left_version, wanted * sizeof(int))
+    if pointer == NULL:
+        return -1
+    heap.left_version = pointer
+    pointer = <int*> realloc(heap.right_version, wanted * sizeof(int))
+    if pointer == NULL:
+        return -1
+    heap.right_version = pointer
+    heap.capacity = wanted
+    return 0
+
+
 cdef int heap_push(
     Heap* heap, double cost, int left, int right, int left_version, int right_version
-) except -1:
+) noexcept nogil:
     cdef Py_ssize_t child, parent
-    if heap.size == heap.capacity:
-        heap.capacity *= 2
-        heap.cost = <double*> realloc(heap.cost, heap.capacity * sizeof(double))
-        heap.left = <int*> realloc(heap.left, heap.capacity * sizeof(int))
-        heap.right = <int*> realloc(heap.right, heap.capacity * sizeof(int))
-        heap.serial = <long*> realloc(heap.serial, heap.capacity * sizeof(long))
-        heap.left_version = <int*> realloc(
-            heap.left_version, heap.capacity * sizeof(int))
-        heap.right_version = <int*> realloc(
-            heap.right_version, heap.capacity * sizeof(int))
-        if not heap.cost or not heap.left or not heap.right or not heap.serial \
-                or not heap.left_version or not heap.right_version:
-            raise MemoryError('could not grow the contraction queue')
+    if heap.size == heap.capacity and heap_grow(heap) < 0:
+        return -1
     child = heap.size
     heap.cost[child] = cost
     heap.left[child] = left
@@ -143,7 +239,7 @@ cdef int heap_push(
 
 cdef void heap_pop(
     Heap* heap, double* cost, int* left, int* right, int* left_version, int* right_version
-) noexcept:
+) noexcept nogil:
     cdef Py_ssize_t parent = 0, child
     cost[0] = heap.cost[0]
     left[0] = heap.left[0]
@@ -202,11 +298,18 @@ cdef class Reducer:
     cdef double min_quality
     cdef double error_limit
 
-    # Scratch, reused by every candidate rather than reallocated.
-    cdef int* ring_a
-    cdef int* ring_b
-    cdef int* touched
-    cdef int* on_edge
+    # Scratch, reused by every candidate rather than reallocated. Each grows to
+    # whatever neighbourhood it is handed: a fan-triangulated n-gon, a lathe
+    # pole or a CAD hub has a point of any valence at all, and a fixed ceiling
+    # would mean passing those candidates over -- a different reduction from the
+    # NumPy path's, arrived at silently.
+    cdef IntPool ring_a
+    cdef IntPool ring_b
+    cdef IntPool opposite
+    cdef IntPool touched
+    cdef IntPool on_edge
+    cdef IntPool moving
+    cdef IntPool ring
 
     # The log.
     cdef int* log_dying
@@ -215,17 +318,20 @@ cdef class Reducer:
     cdef double* log_deviation
     cdef Py_ssize_t log_size
     cdef Py_ssize_t log_capacity
-    cdef long* removed_at
+    cdef cnp.int64_t* removed_at
 
     def __cinit__(self):
         self.head = NULL
         self.nxt = NULL
         self.prv = NULL
         self.version = NULL
-        self.ring_a = NULL
-        self.ring_b = NULL
-        self.touched = NULL
-        self.on_edge = NULL
+        self.ring_a.data = NULL; self.ring_a.capacity = 0
+        self.ring_b.data = NULL; self.ring_b.capacity = 0
+        self.opposite.data = NULL; self.opposite.capacity = 0
+        self.touched.data = NULL; self.touched.capacity = 0
+        self.on_edge.data = NULL; self.on_edge.capacity = 0
+        self.moving.data = NULL; self.moving.capacity = 0
+        self.ring.data = NULL; self.ring.capacity = 0
         self.log_dying = NULL
         self.log_surviving = NULL
         self.log_place = NULL
@@ -234,8 +340,9 @@ cdef class Reducer:
 
     def __dealloc__(self):
         free(self.head); free(self.nxt); free(self.prv); free(self.version)
-        free(self.ring_a); free(self.ring_b)
-        free(self.touched); free(self.on_edge)
+        free(self.ring_a.data); free(self.ring_b.data); free(self.opposite.data)
+        free(self.touched.data); free(self.on_edge.data)
+        free(self.moving.data); free(self.ring.data)
         free(self.log_dying); free(self.log_surviving)
         free(self.log_place); free(self.log_deviation)
         free(self.removed_at)
@@ -272,7 +379,7 @@ cdef class Reducer:
         self.head = <int*> malloc(self.point_count * sizeof(int))
         self.nxt = <int*> malloc(3 * self.face_count * sizeof(int))
         self.prv = <int*> malloc(3 * self.face_count * sizeof(int))
-        self.removed_at = <long*> malloc(self.face_count * sizeof(long))
+        self.removed_at = <cnp.int64_t*> malloc(self.face_count * sizeof(cnp.int64_t))
         self.version = <int*> malloc(self.point_count * sizeof(int))
         if not self.head or not self.nxt or not self.prv or not self.removed_at \
                 or not self.version:
@@ -287,11 +394,13 @@ cdef class Reducer:
                 for slot in range(3):
                     self._attach(faces[i, slot], <int> (3 * i + slot))
 
-        self.ring_a = <int*> malloc(SCRATCH * sizeof(int))
-        self.ring_b = <int*> malloc(SCRATCH * sizeof(int))
-        self.touched = <int*> malloc(SCRATCH * sizeof(int))
-        self.on_edge = <int*> malloc(SCRATCH * sizeof(int))
-        if not self.ring_a or not self.ring_b or not self.touched or not self.on_edge:
+        if (pool_reserve(&self.ring_a, SCRATCH) < 0
+                or pool_reserve(&self.ring_b, SCRATCH) < 0
+                or pool_reserve(&self.opposite, SCRATCH) < 0
+                or pool_reserve(&self.touched, SCRATCH) < 0
+                or pool_reserve(&self.on_edge, SCRATCH) < 0
+                or pool_reserve(&self.moving, SCRATCH) < 0
+                or pool_reserve(&self.ring, SCRATCH) < 0):
             raise MemoryError('could not allocate the working buffers')
 
         self.log_capacity = 1024
@@ -304,14 +413,14 @@ cdef class Reducer:
             raise MemoryError('could not allocate the contraction log')
         self.log_size = 0
 
-    cdef inline void _attach(self, int point, int incidence) noexcept:
+    cdef inline void _attach(self, int point, int incidence) noexcept nogil:
         self.nxt[incidence] = self.head[point]
         self.prv[incidence] = -1
         if self.head[point] >= 0:
             self.prv[self.head[point]] = incidence
         self.head[point] = incidence
 
-    cdef inline void _detach(self, int point, int incidence) noexcept:
+    cdef inline void _detach(self, int point, int incidence) noexcept nogil:
         if self.prv[incidence] >= 0:
             self.nxt[self.prv[incidence]] = self.nxt[incidence]
         else:
@@ -319,26 +428,24 @@ cdef class Reducer:
         if self.nxt[incidence] >= 0:
             self.prv[self.nxt[incidence]] = self.prv[incidence]
 
-    cdef int _faces_on_edge(self, int a, int b) noexcept:
+    cdef int _faces_on_edge(self, int a, int b) noexcept nogil:
         """Fill ``on_edge`` with the live faces using both ends; return how many.
 
-        ``-1`` where the neighbourhood is larger than the buffers hold, which
-        makes the caller pass the candidate over. A point with a thousand faces
-        on it is not a surface anybody should be contracting blind.
+        ``-1`` where the buffer could not be grown to hold them, which is out of
+        memory and nothing else.
         """
         cdef int incidence = self.head[a], face, found = 0
         while incidence >= 0:
             face = incidence // 3
             if (self.faces[face, 0] == b or self.faces[face, 1] == b
                     or self.faces[face, 2] == b):
-                if found >= SCRATCH:
+                if pool_append(&self.on_edge, found, face) < 0:
                     return -1
-                self.on_edge[found] = face
                 found += 1
             incidence = self.nxt[incidence]
         return found
 
-    cdef int _ring(self, int point, int* out) noexcept:
+    cdef int _ring(self, int point, IntPool* out) noexcept nogil:
         """Fill ``out`` with the points joined to ``point``; return how many.
 
         Duplicates are removed by a linear scan, which is the right shape here:
@@ -356,97 +463,88 @@ cdef class Reducer:
                     continue
                 seen = False
                 for i in range(found):
-                    if out[i] == other:
+                    if out.data[i] == other:
                         seen = True
                         break
                 if not seen:
-                    if found >= SCRATCH:
+                    if pool_append(out, found, other) < 0:
                         return -1
-                    out[found] = other
                     found += 1
             incidence = self.nxt[incidence]
         return found
 
-    cdef bint _link_condition(self, int a, int b, int edge_faces) noexcept:
-        """The points joined to both ends must be exactly those opposite the edge."""
-        cdef int count_a = self._ring(a, self.ring_a)
-        cdef int count_b = self._ring(b, self.ring_b)
+    cdef int _link_condition(self, int a, int b, int edge_faces) noexcept nogil:
+        """The points joined to both ends must be exactly those opposite the edge.
+
+        1 where the contraction keeps the surface a surface, 0 where it does
+        not, -1 where a buffer could not be grown.
+        """
+        cdef int count_a = self._ring(a, &self.ring_a)
+        cdef int count_b = self._ring(b, &self.ring_b)
         cdef int i, j, shared = 0
         cdef int opposite = 0, face, slot, point, k
         cdef bint counted
 
         if count_a < 0 or count_b < 0:
-            return False
+            return -1
 
         for i in range(count_a):
             for j in range(count_b):
-                if self.ring_a[i] == self.ring_b[j]:
+                if self.ring_a.data[i] == self.ring_b.data[j]:
                     shared += 1
                     break
         # Distinct points opposite the edge. Two faces sharing one is a pillow,
         # and leaving it to the count is what refuses it.
         for i in range(edge_faces):
-            face = self.on_edge[i]
+            face = self.on_edge.data[i]
             for slot in range(3):
                 point = self.faces[face, slot]
                 if point == a or point == b:
                     continue
                 counted = False
                 for k in range(opposite):
-                    if self.ring_a[SCRATCH // 2 + k] == point:
+                    if self.opposite.data[k] == point:
                         counted = True
                         break
-                if not counted and opposite < SCRATCH // 2:
-                    self.ring_a[SCRATCH // 2 + opposite] = point
+                if not counted:
+                    if pool_append(&self.opposite, opposite, point) < 0:
+                        return -1
                     opposite += 1
-        return shared == opposite
+        return 1 if shared == opposite else 0
 
-    cdef int _affected(self, int a, int b, int edge_faces) noexcept:
+    cdef int _affected(self, int a, int b, int edge_faces) noexcept nogil:
         """Fill ``touched`` with the faces that outlive a contraction of (a, b)."""
         cdef int incidence, face, i, found = 0
+        cdef int end
         cdef bint on
-        incidence = self.head[a]
-        while incidence >= 0:
-            face = incidence // 3
-            on = False
-            for i in range(edge_faces):
-                if self.on_edge[i] == face:
-                    on = True
-                    break
-            if not on:
-                if found >= SCRATCH:
-                    return -1
-                self.touched[found] = face
-                found += 1
-            incidence = self.nxt[incidence]
-        incidence = self.head[b]
-        while incidence >= 0:
-            face = incidence // 3
-            on = False
-            for i in range(edge_faces):
-                if self.on_edge[i] == face:
-                    on = True
-                    break
-            if not on:
-                if found >= SCRATCH:
-                    return -1
-                self.touched[found] = face
-                found += 1
-            incidence = self.nxt[incidence]
+        for end in range(2):
+            incidence = self.head[a] if end == 0 else self.head[b]
+            while incidence >= 0:
+                face = incidence // 3
+                on = False
+                for i in range(edge_faces):
+                    if self.on_edge.data[i] == face:
+                        on = True
+                        break
+                if not on:
+                    if pool_append(&self.touched, found, face) < 0:
+                        return -1
+                    found += 1
+                incidence = self.nxt[incidence]
         return found
 
-    cdef bint _would_duplicate(self, int a, int b, int count) noexcept:
+    cdef bint _would_duplicate(self, int a, int b, int count) noexcept nogil:
         """Two surviving faces landing on the same three points."""
         cdef int i, j, fi, fj, s
         cdef int pi[3]
         cdef int pj[3]
         for i in range(count):
-            fi = self.touched[i]
+            fi = self.touched.data[i]
             for s in range(3):
                 pi[s] = b if self.faces[fi, s] == a else self.faces[fi, s]
             _sort3(pi)
             for j in range(i + 1, count):
-                fj = self.touched[j]
+                fj = self.touched.data[j]
                 for s in range(3):
                     pj[s] = b if self.faces[fj, s] == a else self.faces[fj, s]
                 _sort3(pj)
@@ -454,7 +552,7 @@ cdef class Reducer:
                     return True
         return False
 
-    cdef bint _would_distort(self, int a, int b, double* place, int count) noexcept:
+    cdef bint _would_distort(self, int a, int b, double* place, int count) noexcept nogil:
         """A face turned past the limit, thinned past the floor, or vanished."""
         cdef int i, s, face, point
         cdef double before[3][3]
@@ -463,7 +561,7 @@ cdef class Reducer:
         cdef double new[3]
         cdef double old_len, new_len, cosine, quality
         for i in range(count):
-            face = self.touched[i]
+            face = self.touched.data[i]
             for s in range(3):
                 point = self.faces[face, s]
                 before[s][0] = self.positions[point, 0]
@@ -495,7 +593,7 @@ cdef class Reducer:
                     return True
         return False
 
-    cdef double _price(self, int a, int b, double* place) noexcept:
+    cdef double _price(self, int a, int b, double* place) noexcept nogil:
         """The deviation contracting (a, b) would cost, and where it would land."""
         cdef double q[10]
         cdef int i
@@ -503,6 +601,7 @@ cdef class Reducer:
         cdef double candidate[3]
         cdef double optimum[3]
         cdef bint have_best = False, solved
+        optimum[0] = 0.0; optimum[1] = 0.0; optimum[2] = 0.0
         cdef bint locked_a = self.kinds[a] == 2
         cdef bint locked_b = self.kinds[b] == 2
 
@@ -553,19 +652,38 @@ cdef class Reducer:
             weight = TINY
         return sqrt(best / weight)
 
-    cdef int _record(self, int dying, int surviving, double* place, double deviation) except -1:
-        if self.log_size == self.log_capacity:
-            self.log_capacity *= 2
-            self.log_dying = <int*> realloc(self.log_dying, self.log_capacity * sizeof(int))
-            self.log_surviving = <int*> realloc(
-                self.log_surviving, self.log_capacity * sizeof(int))
-            self.log_place = <double*> realloc(
-                self.log_place, 3 * self.log_capacity * sizeof(double))
-            self.log_deviation = <double*> realloc(
-                self.log_deviation, self.log_capacity * sizeof(double))
-            if not self.log_dying or not self.log_surviving or not self.log_place \
-                    or not self.log_deviation:
-                raise MemoryError('could not grow the contraction log')
+    cdef int _grow_log(self) noexcept nogil:
+        """Double the log. 0 on success, -1 where there is no memory.
+
+        As in :func:`heap_grow`, each block is adopted only once ``realloc`` has
+        returned one, since a failure leaves the original allocated and losing
+        the pointer would lose the log.
+        """
+        cdef Py_ssize_t wanted = self.log_capacity * 2
+        cdef int* indices
+        cdef double* values
+        indices = <int*> realloc(self.log_dying, wanted * sizeof(int))
+        if indices == NULL:
+            return -1
+        self.log_dying = indices
+        indices = <int*> realloc(self.log_surviving, wanted * sizeof(int))
+        if indices == NULL:
+            return -1
+        self.log_surviving = indices
+        values = <double*> realloc(self.log_place, 3 * wanted * sizeof(double))
+        if values == NULL:
+            return -1
+        self.log_place = values
+        values = <double*> realloc(self.log_deviation, wanted * sizeof(double))
+        if values == NULL:
+            return -1
+        self.log_deviation = values
+        self.log_capacity = wanted
+        return 0
+
+    cdef int _record(self, int dying, int surviving, double* place, double deviation) noexcept nogil:
+        if self.log_size == self.log_capacity and self._grow_log() < 0:
+            return -1
         self.log_dying[self.log_size] = dying
         self.log_surviving[self.log_size] = surviving
         self.log_place[3 * self.log_size + 0] = place[0]
@@ -575,16 +693,18 @@ cdef class Reducer:
         self.log_size += 1
         return 0
 
-    cdef void _contract(self, int dying, int surviving, double* place, int edge_faces) noexcept:
+    cdef int _contract(self, int dying, int surviving, double* place, int edge_faces) noexcept nogil:
+        """Apply the contraction. 0 on success, -1 where there is no memory.
+
+        The incidences to move are collected before any of them is moved: the
+        walk is over the very list the move splices them out of.
+        """
         cdef int i, slot, incidence, face, point
-        cdef long step = <long> (self.log_size - 1)
-        cdef int moving[SCRATCH]
+        cdef cnp.int64_t step = <cnp.int64_t> (self.log_size - 1)
         cdef int moving_count = 0
-        # Bounded by construction: the candidate was refused above unless every
-        # buffer held its neighbourhood.
 
         for i in range(edge_faces):
-            face = self.on_edge[i]
+            face = self.on_edge.data[i]
             if not self.alive[face]:
                 continue
             self.alive[face] = 0
@@ -595,12 +715,12 @@ cdef class Reducer:
 
         incidence = self.head[dying]
         while incidence >= 0:
-            if moving_count < SCRATCH:
-                moving[moving_count] = incidence
-                moving_count += 1
+            if pool_append(&self.moving, moving_count, incidence) < 0:
+                return -1
+            moving_count += 1
             incidence = self.nxt[incidence]
         for i in range(moving_count):
-            incidence = moving[i]
+            incidence = self.moving.data[i]
             face = incidence // 3
             slot = incidence % 3
             self._detach(dying, incidence)
@@ -616,78 +736,106 @@ cdef class Reducer:
         self.version[surviving] += 1
         point = dying
         self.head[point] = -1
+        return 0
 
     def run(self, int[:, ::1] edges, Py_ssize_t target_faces):
-        """Contract until ``target_faces`` is reached or nothing is left to do."""
+        """Contract until ``target_faces`` is reached or nothing is left to do.
+
+        The loop itself runs with the GIL released. Everything it touches is a
+        typed memoryview or a C pool, so a thread that decimates in the
+        background leaves the rest of the process running at full speed --
+        which is what a build tool or an editor needs from it.
+        """
         cdef Heap heap
-        cdef double cost, fresh
-        cdef int a, b, dying, surviving, edge_faces, affected, i, other
-        cdef int queued_a, queued_b
-        cdef double place[3]
-        cdef double current[3]
-        cdef int ring[SCRATCH]
-        cdef int ring_count
-        cdef bint can_a, can_b
+        cdef int failure
 
         heap_init(&heap, 1024)
         try:
-            self._queue_all(&heap, edges)
-            while heap.size > 0 and self.live_faces > target_faces:
-                heap_pop(&heap, &cost, &a, &b, &queued_a, &queued_b)
-                if self.version[a] != queued_a or self.version[b] != queued_b:
-                    continue
-                if self.head[a] < 0 or self.head[b] < 0:
-                    continue
-                edge_faces = self._faces_on_edge(a, b)
-                if edge_faces <= 0:
-                    continue
-                fresh = self._price(a, b, current)
-                if fresh < 0.0:
-                    continue
-                if self.error_limit >= 0.0 and fresh > self.error_limit:
-                    break
-
-                can_a = self.kinds[a] != 2 and (
-                    self.kinds[a] != 1 or edge_faces == 1)
-                can_b = self.kinds[b] != 2 and (
-                    self.kinds[b] != 1 or edge_faces == 1)
-                if can_a:
-                    dying, surviving = a, b
-                elif can_b:
-                    dying, surviving = b, a
-                else:
-                    continue
-                if not self._link_condition(a, b, edge_faces):
-                    continue
-                affected = self._affected(a, b, edge_faces)
-                if affected < 0:
-                    continue
-                if self._would_duplicate(dying, surviving, affected):
-                    continue
-                place[0] = current[0]; place[1] = current[1]; place[2] = current[2]
-                if self._would_distort(dying, surviving, place, affected):
-                    continue
-
-                self._record(dying, surviving, place, fresh)
-                self._contract(dying, surviving, place, edge_faces)
-
-                ring_count = self._ring(surviving, ring)
-                _sort_ints(ring, ring_count)
-                for i in range(ring_count):
-                    other = ring[i]
-                    fresh = self._price(surviving, other, current)
-                    if fresh >= 0.0:
-                        if surviving < other:
-                            heap_push(&heap, fresh, surviving, other,
-                                      self.version[surviving], self.version[other])
-                        else:
-                            heap_push(&heap, fresh, other, surviving,
-                                      self.version[other], self.version[surviving])
+            with nogil:
+                failure = self._loop(&heap, edges, target_faces)
         finally:
             heap_free(&heap)
+        if failure < 0:
+            raise MemoryError('the reducer ran out of memory')
         return self._log()
 
-    cdef int _queue_all(self, Heap* heap, int[:, ::1] edges) except -1:
+    cdef int _loop(self, Heap* heap, int[:, ::1] edges, Py_ssize_t target_faces) noexcept nogil:
+        """The contraction loop. 0 when it finished, -1 out of memory."""
+        cdef double cost, fresh
+        cdef int a, b, dying, surviving, edge_faces, affected, i, other
+        cdef int queued_a, queued_b, linked
+        cdef double place[3]
+        cdef double current[3]
+        cdef int ring_count
+        cdef bint can_a, can_b
+
+        if self._queue_all(heap, edges) < 0:
+            return -1
+        while heap.size > 0 and self.live_faces > target_faces:
+            heap_pop(heap, &cost, &a, &b, &queued_a, &queued_b)
+            if self.version[a] != queued_a or self.version[b] != queued_b:
+                continue
+            if self.head[a] < 0 or self.head[b] < 0:
+                continue
+            edge_faces = self._faces_on_edge(a, b)
+            if edge_faces < 0:
+                return -1
+            if edge_faces == 0:
+                continue
+            fresh = self._price(a, b, current)
+            if fresh < 0.0:
+                continue
+            if self.error_limit >= 0.0 and fresh > self.error_limit:
+                break
+
+            can_a = self.kinds[a] != 2 and (
+                self.kinds[a] != 1 or edge_faces == 1)
+            can_b = self.kinds[b] != 2 and (
+                self.kinds[b] != 1 or edge_faces == 1)
+            if can_a:
+                dying, surviving = a, b
+            elif can_b:
+                dying, surviving = b, a
+            else:
+                continue
+            linked = self._link_condition(a, b, edge_faces)
+            if linked < 0:
+                return -1
+            if linked == 0:
+                continue
+            affected = self._affected(a, b, edge_faces)
+            if affected < 0:
+                return -1
+            if self._would_duplicate(dying, surviving, affected):
+                continue
+            place[0] = current[0]; place[1] = current[1]; place[2] = current[2]
+            if self._would_distort(dying, surviving, place, affected):
+                continue
+
+            if self._record(dying, surviving, place, fresh) < 0:
+                return -1
+            if self._contract(dying, surviving, place, edge_faces) < 0:
+                return -1
+
+            ring_count = self._ring(surviving, &self.ring)
+            if ring_count < 0:
+                return -1
+            _sort_ints(self.ring.data, ring_count)
+            for i in range(ring_count):
+                other = self.ring.data[i]
+                fresh = self._price(surviving, other, current)
+                if fresh >= 0.0:
+                    if surviving < other:
+                        if heap_push(heap, fresh, surviving, other,
+                                     self.version[surviving], self.version[other]) < 0:
+                            return -1
+                    else:
+                        if heap_push(heap, fresh, other, surviving,
+                                     self.version[other], self.version[surviving]) < 0:
+                            return -1
+        return 0
+
+    cdef int _queue_all(self, Heap* heap, int[:, ::1] edges) noexcept nogil:
         """Price the caller's edges, in the caller's order, into the queue.
 
         The order matters beyond tidiness: equal-priced edges are separated by
@@ -702,8 +850,9 @@ cdef class Reducer:
         for i in range(edges.shape[0]):
             cost = self._price(edges[i, 0], edges[i, 1], place)
             if cost >= 0.0:
-                heap_push(heap, cost, edges[i, 0], edges[i, 1],
-                          self.version[edges[i, 0]], self.version[edges[i, 1]])
+                if heap_push(heap, cost, edges[i, 0], edges[i, 1],
+                             self.version[edges[i, 0]], self.version[edges[i, 1]]) < 0:
+                    return -1
         return 0
 
     cdef _log(self):
@@ -712,11 +861,11 @@ cdef class Reducer:
         cdef cnp.ndarray place = np.empty((self.log_size, 3), dtype=np.float64)
         cdef cnp.ndarray deviation = np.empty(self.log_size, dtype=np.float64)
         cdef cnp.ndarray removed = np.empty(self.face_count, dtype=np.int64)
-        cdef long[::1] out_dying = dying
-        cdef long[::1] out_surviving = surviving
+        cdef cnp.int64_t[::1] out_dying = dying
+        cdef cnp.int64_t[::1] out_surviving = surviving
         cdef double[:, ::1] out_place = place
         cdef double[::1] out_deviation = deviation
-        cdef long[::1] out_removed = removed
+        cdef cnp.int64_t[::1] out_removed = removed
         cdef Py_ssize_t i
         for i in range(self.log_size):
             out_dying[i] = self.log_dying[i]
@@ -730,7 +879,7 @@ cdef class Reducer:
         return dying, surviving, place, deviation, removed
 
 
-cdef inline void _sort_ints(int* values, int count) noexcept:
+cdef inline void _sort_ints(int* values, int count) noexcept nogil:
     """Insertion sort: a point has a handful of neighbours, never a heap of them."""
     cdef int i, j, held
     for i in range(1, count):
@@ -742,7 +891,7 @@ cdef inline void _sort_ints(int* values, int count) noexcept:
         values[j + 1] = held
 
 
-cdef inline void _sort3(int* values) noexcept:
+cdef inline void _sort3(int* values) noexcept nogil:
     cdef int swap
     if values[0] > values[1]:
         swap = values[0]; values[0] = values[1]; values[1] = swap
@@ -752,7 +901,7 @@ cdef inline void _sort3(int* values) noexcept:
         swap = values[0]; values[0] = values[1]; values[1] = swap
 
 
-cdef inline void _normal(double corners[3][3], double* out) noexcept:
+cdef inline void _normal(double corners[3][3], double* out) noexcept nogil:
     cdef double ax = corners[1][0] - corners[0][0]
     cdef double ay = corners[1][1] - corners[0][1]
     cdef double az = corners[1][2] - corners[0][2]
@@ -764,7 +913,7 @@ cdef inline void _normal(double corners[3][3], double* out) noexcept:
     out[2] = ax * by - ay * bx
 
 
-cdef inline double _quality(double corners[3][3]) noexcept:
+cdef inline double _quality(double corners[3][3]) noexcept nogil:
     """Four root three times the area over the summed squared edge lengths."""
     cdef double n[3]
     cdef double lengths = 0.0, delta
@@ -784,7 +933,7 @@ cdef inline double _quality(double corners[3][3]) noexcept:
     return 6.928203230275509 * area / lengths
 
 
-cdef inline double _evaluate(double* q, double* p) noexcept:
+cdef inline double _evaluate(double* q, double* p) noexcept nogil:
     """The cost a packed quadric assigns to a point."""
     return (
         q[0] * p[0] * p[0] + q[4] * p[1] * p[1] + q[7] * p[2] * p[2]
@@ -794,7 +943,7 @@ cdef inline double _evaluate(double* q, double* p) noexcept:
     )
 
 
-cdef inline bint _minimise(double* q, double* out) noexcept:
+cdef inline bint _minimise(double* q, double* out) noexcept nogil:
     """Solve for the quadric's minimum; False where it has no single one."""
     cdef double a00 = q[0], a01 = q[1], a02 = q[2]
     cdef double a11 = q[4], a12 = q[5], a22 = q[7]

@@ -43,6 +43,25 @@ Each point accumulates the planes of its incident triangles, weighted by area �
 which stops a dense patch of tiny triangles outvoting the large ones around it,
 so the quadric measures deviation of *surface* rather than a count of planes.
 
+**Where the origin is.** A plane's constant term is the squared plane offset,
+taken from the point's own coordinates. For a model at Earth-centred
+coordinates — `p` around 6.4e6, which is what 3D Tiles and any ECEF-referenced
+world uses — that constant is around 4e13, while the squared distance the
+quadric exists to report is around 1e-6: nineteen decimal digits of range inside
+a type that carries sixteen, and the cancellation takes the answer with it.
+
+So quadrics are accumulated about the model's own bounding-box centre, and the
+shift is undone when a position is handed back. It is taken on an axis only
+where the model sits at least twice its own half-extent from the origin — where
+absolute coordinates cost something, and where the subtraction and the addition
+that undoes it are both exact, so no model pays a rounding on account of a
+problem it does not have. A reduction is then independent of where the model is:
+the same mesh at the origin and at 6.4e6 gives the same triangles, the same
+placements and the same reported error.
+
+`POSITION` comes back in the float dtype it arrived in, for the same reason — a
+`float32` ulp at 6.4e6 is half a metre.
+
 **Border constraints.** A border edge has one face, and a plane standing
 perpendicular to that face along the edge is a wall the border may slide along
 but not leave. Both ends of every border edge accumulate it. Without this the
@@ -62,9 +81,17 @@ c = (n·p)² + s_n² |p|² + s_p² + 3 s_n² s_p²
 ```
 
 for `E(x) = x'Ax - 2b'x + c`. With both variances at zero this is exactly the
-classical plane quadric. Above zero, `A` is positive *definite* rather than rank
-one, which is what makes a single plane solvable and a noisy neighbourhood well
-conditioned — the case a reconstructed surface presents everywhere.
+classical plane quadric.
+
+The two variances do different things, and the difference matters when choosing
+them. `s_n` reaches `A`, making it positive *definite* rather than rank one —
+which is what makes a single plane solvable and a noisy neighbourhood well
+conditioned, the case a reconstructed surface presents everywhere. `s_p` reaches
+`c` alone, since averaging a fixed quadratic form over a Gaussian cloud of
+sample points adds `s_p² tr(A)` and nothing else: it raises every cost by the
+same amount and leaves the choice of contraction where it was. So `normal_noise`
+is the option that changes the reduction, and with it at zero the probabilistic
+metric is the classical one with an offset on the reported error.
 
 The derivation is checked against a Monte-Carlo estimate of the same expectation
 in `tests/test_quadrics.py`.
@@ -82,8 +109,20 @@ and the four costs are one evaluation over a reshaped stack.
 
 The reported **deviation** is the quadric cost divided by the summed area around
 the two points, square-rooted — so it is a length in model units rather than an
-area-weighted square, which is what makes `target_error` mean something a caller
-can picture.
+area-weighted square, which is what makes `target_error` a figure a caller can
+picture.
+
+**What that length is, exactly.** The cost is a sum of squared distances to
+planes, each weighted by the area of the triangle that contributed it; the
+divisor is the sum of those same areas. Both accumulate together as points
+merge, so the ratio stays a *mean*: the deviation is the area-weighted
+root-mean-square distance to the planes the surface has been through. That is
+the right quantity to steer a reduction by, and it is **not a bound** — a
+root-mean-square never is, and planes extend past the triangles that made them,
+which pulls it down further. Measured against `certify` on an icosphere it runs
+a little above the sampled root-mean-square and around half the sampled
+maximum; a level of detail's switching distance needs the maximum, so build it
+on [`certify`](#8-measure-what-happened) rather than on this.
 
 ## 4. Refuse what would break the surface
 
@@ -111,10 +150,19 @@ for a line. Off by default: it trades reduction for triangle shape.
 ## 5. Choose the next one
 
 **`heap`** keeps every candidate in a priority queue ordered by deviation, with
-lazy invalidation: a stamp per pair, bumped whenever the pair is re-priced, and a
-pop whose stamp is stale is discarded. After a contraction only the survivor's
-quadric changed, so only the edges around it are re-priced — one batched call,
-not one call per edge.
+lazy invalidation: an entry that has been superseded is discarded when it is
+popped rather than hunted down when it goes stale. After a contraction only the
+survivor's quadric changed, so only the edges around it are re-priced — one
+batched call, not one call per edge.
+
+The two implementations spell the staleness test differently, because they are
+sized for different meshes. The NumPy path keeps a stamp per *pair* in a dict,
+bumped whenever the pair is re-priced. The compiled path keeps a version per
+*point*, bumped when its quadric changes, and each queued entry names the two
+versions it was priced against — which costs one integer per point instead of a
+hash map the size of the queue, and is the difference between fitting a scan in
+memory and not. The orders agree because a pair goes stale under either test on
+exactly the same event: a contraction at one of its ends.
 
 This is the best quality available and it is sequential by construction: every
 contraction changes the price of its neighbours, so the next choice depends on
@@ -127,6 +175,12 @@ longer an edge is dropped when it is drawn rather than hunted for.
 
 Giving up the global ordering is the point: it is what makes a reduction
 divisible, and it is the schedule a parallel or GPU implementation is built on.
+
+**Only `heap` has the compiled loop.** `multiple-choice` runs the NumPy
+implementation whether or not the accelerator is installed, so as it stands it
+is around thirty times slower per face than the schedule it is the scalable
+alternative to. The divisibility is what it is for; the throughput is not yet
+there to go with it.
 
 ## 6. Record it
 
@@ -145,8 +199,12 @@ Replaying a prefix of length *k* is four array operations:
   live set is a comparison.
 - **The attributes.** They never moved, so there is nothing to recompute.
 
-So `at()` costs the same whether it is asked for ninety per cent of the triangles
-or two, and asking fifty times in a row costs fifty times that and no more.
+So a target costs a replay rather than a reduction — a few milliseconds against
+the tens the reduction itself took — and the cost does not grow with how far
+along the sequence the target is. What it does scale with is the mesh handed
+back, since step 7 has to assemble it: asking for twenty thousand triangles
+costs a good deal more than asking for twenty. Fifty asks cost fifty replays,
+which is still a fraction of one reduction.
 
 ## 7. Hand it back
 
@@ -160,10 +218,11 @@ input's vertices to the output's.
 
 ## 8. Measure what happened
 
-The quadric's own number is an estimate accumulated from planes, and planes
-extend past the triangles that produced them, so it drifts optimistic as a
-reduction goes on. What a level of detail has to promise is a bound on the
-*surface*, which is a different quantity.
+The quadric's own number is an area-weighted root-mean-square distance to the
+planes the surface has been through — see [step 3](#3-price-every-candidate).
+What a level of detail has to promise is a bound on the *surface*: a maximum
+rather than a mean, over the triangles rather than over their planes. Those are
+two different quantities, and the second has to be measured.
 
 [`certify.surface_deviation`](../src/opengl_decimate/certify.py) samples both
 surfaces in proportion to area and asks each sample how far it is from the other,
@@ -174,6 +233,20 @@ The point-to-triangle distance underneath it is exact. The plane is divided into
 the seven regions a nearest point can fall in — the face, three edges, three
 corners — and every region is evaluated for every pair with the right one
 selected, which makes it one pass over arrays rather than a branch per triangle.
+
+**Finding the triangle to measure against.** Testing every sample against every
+triangle is the product of the two counts, which on a scan is billions. So the
+triangles go into a uniform grid — each registered in every cell its bounding
+box covers — and a sample is measured against the handful in the cells around
+it, widening a ring at a time until the nearest found is no further away than
+the ring searched. At that point no triangle outside the ring can beat it, so
+the answer is exact rather than approximate. The widening stops where a ring
+would cost more than measuring against every triangle, and the few samples still
+unsettled are measured that way instead.
+
+The same grid answers the other question that needs one: which points a
+`weld_tolerance` merges. Both live in
+[`opengl_decimate.spatial`](../src/opengl_decimate/spatial.py).
 
 ## References
 

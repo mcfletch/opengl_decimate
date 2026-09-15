@@ -144,8 +144,10 @@ warn_return_any = false
 #
 # Free-threaded builds (`cp313t`, `cp314t`) are not produced: `cp314-*` does not
 # match `cp314t-*`, so adding them is a deliberate act rather than something
-# this pattern does by accident. The reducer holds the GIL throughout and would
-# need auditing before it is offered to a free-threaded interpreter.
+# this pattern does by accident. The contraction loop runs with the GIL
+# released and touches only its own C pools and the memoryviews it was handed,
+# but nothing here has yet been run on a free-threaded interpreter, so the
+# claim is untested rather than made.
 build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
 skip = "*-musllinux_i686 *_i686"
 build-frontend = "build"

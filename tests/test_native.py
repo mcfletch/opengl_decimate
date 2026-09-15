@@ -9,6 +9,9 @@ Where the accelerator did not build, the comparisons skip and the rest of the
 suite still holds the NumPy path to its contract.
 """
 
+import threading
+import time
+
 import numpy as np
 import pytest
 import shapes
@@ -113,6 +116,61 @@ class TestTheTwoPathsAgree:
         direct = simplify({'POSITION': positions}, indices, SimplifyOptions(target_count=400))
         assert np.array_equal(sequence.at(target_count=400).indices, direct.indices)
 
+    @pytest.mark.parametrize('valence', [63, 64, 65, 1023, 1024, 1025, 2000])
+    def test_they_agree_at_any_valence(self, valence):
+        """A point's neighbourhood has no size the compiled path gives up at.
+
+        The buffers the compiled reducer walks a neighbourhood in used to be
+        fixed, and a point with more faces than they held had its candidates
+        passed over -- silently, and only on that path. The sizes here straddle
+        the buffers' starting size and the old ceiling.
+        """
+        positions, indices = shapes.fan(valence)
+        options = SimplifyOptions(target_count=1, locked=list(range(1, valence + 1)))
+        compiled, pure = _both({'POSITION': positions}, indices, options)
+        assert compiled.triangle_count == pure.triangle_count
+        assert np.array_equal(compiled.indices, pure.indices)
+
+    def test_they_agree_with_a_tolerance_weld(self):
+        positions, indices = shapes.nearly_coincident(24, spread=1e-7)
+        compiled, pure = _both(
+            {'POSITION': positions},
+            indices,
+            SimplifyOptions(target_ratio=0.4, weld_tolerance=1e-5),
+        )
+        assert compiled.triangle_count == pure.triangle_count
+        assert compiled.attributes['POSITION'] == pytest.approx(
+            pure.attributes['POSITION'], abs=1e-9
+        )
+
+    def test_they_agree_on_named_locks(self):
+        """`locked` is the option the cluster-boundary workflow is built on."""
+        positions, indices = shapes.grid(14, bump=0.3)
+        held = list(range(0, len(positions), 7))
+        compiled, pure = _both(
+            {'POSITION': positions}, indices, SimplifyOptions(target_ratio=0.3, locked=held)
+        )
+        assert compiled.triangle_count == pure.triangle_count
+        assert np.array_equal(compiled.indices, pure.indices)
+
+    @pytest.mark.parametrize(
+        'maker', [shapes.bowtie, shapes.nonmanifold_edge], ids=['bowtie', 'non-manifold']
+    )
+    def test_they_agree_on_a_surface_that_is_not_one(self, maker):
+        positions, indices = maker()
+        compiled, pure = _both({'POSITION': positions}, indices, SimplifyOptions(target_count=1))
+        assert np.array_equal(compiled.indices, pure.indices)
+
+    def test_they_agree_past_the_queue_and_log_capacities(self):
+        """Both grow from 1024, so a mesh smaller than that never grows either."""
+        positions, indices = shapes.icosphere(4)
+        compiled, pure = _both({'POSITION': positions}, indices, SimplifyOptions(target_ratio=0.1))
+        assert compiled.collapses > 1024
+        assert compiled.triangle_count == pure.triangle_count
+        assert compiled.attributes['POSITION'] == pytest.approx(
+            pure.attributes['POSITION'], abs=1e-9
+        )
+
 
 class TestTheCompiledPathKeepsTheInvariants:
     """Whatever it agrees with, it still has to produce a surface."""
@@ -164,6 +222,37 @@ class TestTheCompiledPathKeepsTheInvariants:
         for index in np.flatnonzero(mesh.alive):
             for point in mesh.faces[index]:
                 assert index in mesh.vertex_faces[point]
+
+
+class TestItSharesTheInterpreter:
+    def test_the_loop_does_not_shut_the_interpreter_out(self):
+        """The contraction loop releases the GIL, so a worker thread is usable.
+
+        Asserted as a *share* of the reduction rather than as a duration, so it
+        is a fact about the code and not about the machine: if the loop held the
+        GIL, the watching thread would run not at all for its whole length and
+        the share would be 1. Released, the longest it waits is a scheduling
+        quantum.
+        """
+        positions, indices = shapes.grid(220, bump=0.4)
+        finished = threading.Event()
+
+        def reduce_it():
+            simplify({'POSITION': positions}, indices, SimplifyOptions(target_ratio=0.1))
+            finished.set()
+
+        worker = threading.Thread(target=reduce_it)
+        ticks = []
+        start = time.perf_counter()
+        worker.start()
+        while not finished.is_set():
+            ticks.append(time.perf_counter())
+        worker.join()
+        elapsed = time.perf_counter() - start
+
+        gaps = np.diff(np.asarray(ticks))
+        assert len(gaps), 'the reduction finished before the watcher ticked twice'
+        assert float(gaps.max()) < 0.5 * elapsed
 
 
 class TestTheBuildContract:

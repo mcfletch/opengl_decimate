@@ -12,7 +12,8 @@ generator, a loader, a decimator and a vertex buffer:
         SimplifyOptions(target_ratio=0.25),
     )
     result.attributes['POSITION']       # the coarser mesh
-    result.error                        # measured deviation from the input
+    result.error                        # the reduction's own estimate of the deviation
+    result.measured_error               # the measured deviation, with options.certify on
 
 :func:`collapse_sequence` records the whole reduction once, and
 :meth:`~opengl_decimate.sequence.CollapseSequence.at` then reaches any triangle

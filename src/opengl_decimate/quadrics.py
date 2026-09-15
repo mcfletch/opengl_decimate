@@ -29,9 +29,16 @@ either above zero
         b = (n.p) n + s_n^2 p
         c = (n.p)^2 + s_n^2 |p|^2 + s_p^2 + 3 s_n^2 s_p^2
 
-    for ``E(x) = x'Ax - 2b'x + c``. ``A`` is then positive *definite* rather
-    than rank one, which is what makes a single plane solvable and a noisy
-    neighbourhood well conditioned.
+    for ``E(x) = x'Ax - 2b'x + c``.
+
+    Note which variance does what. ``s_n`` reaches ``A``, and is what makes it
+    positive *definite* rather than rank one -- so a single plane has a minimum
+    and a noisy neighbourhood is well conditioned. ``s_p`` reaches ``c`` alone:
+    it comes from averaging a fixed quadratic form over a Gaussian cloud of
+    sample points, which adds ``s_p^2 tr(A)`` and nothing else. So it raises
+    every cost by the same amount and leaves the choice of contraction exactly
+    where it was; with ``s_n`` at zero this is the classical metric with an
+    offset.
 
     >>> import numpy as np
     >>> one_plane = plane_quadric(np.array([[0.0, 1.0, 0.0]]),

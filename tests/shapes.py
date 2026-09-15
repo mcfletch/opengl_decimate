@@ -154,6 +154,41 @@ def grid(side: int = 5, bump: float = 0.0):
     return _mesh(positions, faces)
 
 
+def fan(valence: int = 16):
+    """An open fan of ``valence - 1`` triangles around one apex.
+
+    The apex is point 0 and the rim is ``1..valence``, so its valence is exactly
+    the argument. A fan-triangulated n-gon, a lathe pole and a CAD hub all
+    present this: one point carrying arbitrarily many faces, in the *input*,
+    where no reduction had a chance to grow it.
+    """
+    angle = np.linspace(0.0, 1.5 * np.pi, valence)
+    rim = np.stack([np.cos(angle), np.zeros(valence), np.sin(angle)], axis=1)
+    positions = np.concatenate([[[0.0, 0.0, 0.0]], rim])
+    faces = np.stack(
+        [
+            np.zeros(valence - 1, dtype=np.int64),
+            np.arange(1, valence, dtype=np.int64),
+            np.arange(2, valence + 1, dtype=np.int64),
+        ],
+        axis=1,
+    )
+    return _mesh(positions, faces)
+
+
+def nearly_coincident(count: int = 200, spread: float = 1e-7):
+    """A grid whose points are each duplicated a hair away, as a scan's are.
+
+    Returns ``(positions, indices)`` where every triangle's corners were jittered
+    independently, so an exact weld finds nothing and a tolerance weld has real
+    work to do.
+    """
+    positions, indices = grid(count)
+    rng = np.random.default_rng(0)
+    jittered = positions.astype('d') + rng.normal(scale=spread, size=positions.shape)
+    return _mesh(jittered, np.asarray(indices, dtype=np.int64).reshape(-1, 3))
+
+
 def bowtie():
     """Two triangles meeting at one vertex and nowhere else."""
     positions = [

@@ -7,7 +7,7 @@ the boundary as arrays rather than as a file or an object graph.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
@@ -16,9 +16,7 @@ __all__ = [
     'FloatArray',
     'IndexArray',
     'AttributeMap',
-    'MutableAttributeMap',
     'POSITION',
-    'INTEGER_ATTRIBUTES',
     'DecimateError',
 ]
 
@@ -30,15 +28,9 @@ IndexArray = np.ndarray[Any, np.dtype[np.integer[Any]]]
 
 #: glTF attribute semantic -> array. What a caller hands in and gets back.
 AttributeMap = Mapping[str, np.ndarray]
-MutableAttributeMap = MutableMapping[str, np.ndarray]
 
 #: The one attribute every mesh must carry.
 POSITION = 'POSITION'
-
-#: Attributes whose values are identifiers rather than quantities. They are
-#: taken from a surviving vertex whole, never averaged: the mean of joint 3 and
-#: joint 9 is joint 6, which is some unrelated bone.
-INTEGER_ATTRIBUTES = frozenset({'JOINTS_0', 'JOINTS_1'})
 
 
 class DecimateError(ValueError):

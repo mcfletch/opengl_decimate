@@ -20,21 +20,69 @@ _TRIANGLE = (
 )
 
 
+def _the_slow_way(point, triangle):
+    """Point-to-triangle distance, worked out one case at a time.
+
+    The projection onto the triangle's plane where that lands inside it, and
+    otherwise the nearest point of each of the three edges, each a segment
+    clamp. Slow, obvious, and independent of the seven-region selector it is
+    used to check.
+    """
+    a, b, c = triangle
+    normal = np.cross(b - a, c - a)
+    area = float(np.linalg.norm(normal))
+    unit = normal / area
+    flat = point - unit * float(np.dot(point - a, unit))
+    inside = all(
+        float(np.dot(np.cross(end - start, flat - start), unit)) / area >= -1e-12
+        for start, end in ((a, b), (b, c), (c, a))
+    )
+    if inside:
+        return float(np.linalg.norm(point - flat))
+    nearest = float('inf')
+    for start, end in ((a, b), (b, c), (c, a)):
+        along = end - start
+        share = np.clip(float(np.dot(point - start, along)) / float(np.dot(along, along)), 0.0, 1.0)
+        nearest = min(nearest, float(np.linalg.norm(point - (start + along * share))))
+    return nearest
+
+
 class TestDistanceToMesh:
     @pytest.mark.parametrize(
         ('point', 'expected'),
         [
             ((0.25, 0.25, 2.0), 2.0),  # over the face
             ((0.25, 0.25, 0.0), 0.0),  # on the face
-            ((5.0, 0.0, 0.0), 4.0),  # past a corner
-            ((-1.0, -1.0, 0.0), 2.0**0.5),  # past the right-angled corner
-            ((1.0, 1.0, 0.0), 0.5**0.5),  # past the long edge
-            ((0.5, -1.0, 0.0), 1.0),  # past a short edge
+            ((5.0, 0.0, 0.0), 4.0),  # past corner B
+            ((-1.0, -1.0, 0.0), 2.0**0.5),  # past corner A, the right angle
+            ((-1.0, 5.0, 0.0), 17.0**0.5),  # past corner C
+            ((1.0, 1.0, 0.0), 0.5**0.5),  # past edge BC, the long one
+            ((0.5, -1.0, 0.0), 1.0),  # past edge AB
+            ((-1.0, 0.5, 0.0), 1.0),  # past edge AC
         ],
     )
     def test_the_closest_point_is_found_in_every_region(self, point, expected):
+        """All seven: the face, the three edges, and the three corners."""
         got = certify.distance_to_mesh(np.asarray([point], dtype='d'), *_TRIANGLE)
         assert got[0] == pytest.approx(expected)
+
+    def test_it_agrees_with_the_distance_worked_out_the_obvious_way(self):
+        """An oracle that shares no code with the thing it is checking.
+
+        The seven-region selector is one expression evaluated for every pair at
+        once, which is what makes it fast and what makes an error in it uniform
+        rather than obvious. :func:`_the_slow_way` is the same question asked
+        the plodding way -- the projection if it lands inside, and otherwise
+        three segment clamps -- and has nothing in common with it but the
+        answer.
+        """
+        positions, indices = shapes.icosphere(1)
+        corners = positions.astype('d')[indices.reshape(-1, 3)]
+        rng = np.random.default_rng(11)
+        probes = rng.normal(size=(60, 3)) * 1.3
+        got = certify.distance_to_mesh(probes, positions, indices)
+        wanted = [min(_the_slow_way(point, triangle) for triangle in corners) for point in probes]
+        assert got == pytest.approx(wanted)
 
     def test_every_vertex_of_a_mesh_is_on_it(self):
         positions, indices = shapes.icosphere(2)
@@ -198,17 +246,65 @@ class TestMeasuringABigSurface:
         rng = np.random.default_rng(5)
         probes = rng.normal(size=(200, 3)) * 1.4
         got = certify.distance_to_mesh(probes, positions, indices)
-
-        # Against the plainest possible statement of the same thing.
         corners = positions.astype('d')[indices.reshape(-1, 3)]
-        wanted = np.array(
-            [
-                np.min(
-                    np.linalg.norm(
-                        certify._closest_on_triangles(point[None, :], corners)[0] - point, axis=1
-                    )
-                )
-                for point in probes
-            ]
-        )
+        wanted = [min(_the_slow_way(point, triangle) for triangle in corners) for point in probes]
         assert got == pytest.approx(wanted)
+
+
+class TestTheGridGivesTheSameAnswerAsTheScan:
+    """Searching nearby cells rather than every triangle is exact, not close.
+
+    A triangle is registered in every cell its bounding box covers, so once a
+    point's nearest is no further away than the ring searched so far, no
+    triangle outside that ring can beat it. These check the claim where it
+    matters: on the surface, off it, far from it, and on a mesh with one huge
+    triangle among small ones, which is what decides the cell size.
+    """
+
+    @pytest.mark.parametrize('spread', [0.0, 0.05, 1.4, 8.0], ids=['on', 'near', 'off', 'far'])
+    def test_the_two_agree_wherever_the_points_are(self, spread):
+        positions, indices = shapes.icosphere(4)
+        corners = positions.astype('d')[np.asarray(indices).reshape(-1, 3)]
+        rng = np.random.default_rng(3)
+        probes = certify.sample_surface(positions, indices, 1500, seed=2)
+        probes = probes + rng.normal(scale=spread, size=probes.shape)
+        by_grid = certify._nearest_by_grid(probes, corners)
+        by_scan = np.sqrt(certify._nearest_among(probes, corners))
+        assert np.array_equal(by_grid, by_scan)
+
+    def test_one_huge_triangle_among_small_ones_does_not_break_it(self):
+        """The cell side is chosen from the mesh, so an outlier has to survive it."""
+        positions, indices = shapes.icosphere(3)
+        positions = np.concatenate(
+            [positions, np.asarray([(40.0, 0, 0), (0, 40.0, 0), (0, 0, 40.0)], dtype='f4')]
+        )
+        base = len(positions) - 3
+        indices = np.concatenate([indices, np.asarray([base, base + 1, base + 2], dtype=np.uint32)])
+        corners = positions.astype('d')[np.asarray(indices).reshape(-1, 3)]
+        rng = np.random.default_rng(7)
+        probes = rng.normal(size=(1200, 3)) * 3.0
+        assert np.array_equal(
+            certify._nearest_by_grid(probes, corners),
+            np.sqrt(certify._nearest_among(probes, corners)),
+        )
+
+    @pytest.mark.parametrize(
+        ('corners', 'side'),
+        [
+            # Triangles with no extent at all say nothing about a cell size, so
+            # the mesh's own extent stands in -- and where that is nothing
+            # either, any positive side will do, since everything is in one cell.
+            pytest.param(np.zeros((4, 3, 3)), 1.0, id='a mesh at one point'),
+            pytest.param(
+                np.stack([np.full((3, 3), 0.0), np.full((3, 3), 6.0)]), 6.0, id='two points apart'
+            ),
+        ],
+    )
+    def test_a_cell_size_is_chosen_even_for_a_mesh_with_no_area(self, corners, side):
+        low, high = np.min(corners, axis=1), np.max(corners, axis=1)
+        assert certify._grid_side(low, high) == side
+
+    def test_a_mesh_of_one_triangle_is_still_a_grid(self):
+        probes = np.asarray([(0.25, 0.25, 2.0), (5.0, 0.0, 0.0), (-1.0, 0.5, 0.0)])
+        corners = _TRIANGLE[0][_TRIANGLE[1].reshape(-1, 3)]
+        assert certify._nearest_by_grid(probes, corners) == pytest.approx([2.0, 4.0, 1.0])

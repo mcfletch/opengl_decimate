@@ -40,6 +40,11 @@ __all__ = ['simplify', 'collapse_sequence']
 
 _TINY = 1e-30
 
+#: What :func:`collapse_sequence` uses where the caller named no options. The
+#: target is there because :class:`SimplifyOptions` requires one and is
+#: ignored because the whole reduction is recorded either way.
+_EXHAUSTIVE = SimplifyOptions(target_ratio=1.0)
+
 
 def simplify(
     attributes: AttributeMap, indices: IndexArray, options: SimplifyOptions
@@ -69,15 +74,20 @@ def simplify(
 
 
 def collapse_sequence(
-    attributes: AttributeMap, indices: IndexArray, options: SimplifyOptions
+    attributes: AttributeMap, indices: IndexArray, options: SimplifyOptions | None = None
 ) -> CollapseSequence:
     """Record the whole reduction, ignoring the targets in ``options``.
 
     The targets are what :meth:`~opengl_decimate.sequence.CollapseSequence.at`
     is asked for afterwards, one at a time and as often as wanted. This is the
     call an editor makes once when a model is loaded.
+
+    ``options`` says how to reduce -- the metric, the noise, the locks, the
+    placement, the weld, the schedule -- and every target in it is ignored, so
+    it may be left out entirely where the defaults will do. What stops the
+    reduction here is the surface running out, not a budget.
     """
-    return _reduce(attributes, indices, options, exhaust=True)
+    return _reduce(attributes, indices, options or _EXHAUSTIVE, exhaust=True)
 
 
 def _check(attributes: AttributeMap) -> FloatArray:
@@ -86,9 +96,12 @@ def _check(attributes: AttributeMap) -> FloatArray:
         raise DecimateError("attributes must include 'POSITION'")
     positions = np.asarray(attributes[POSITION])
     for name, value in attributes.items():
-        if len(value) != len(positions):
+        rows = np.asarray(value)
+        if not rows.ndim:
+            raise DecimateError('%s is a single value, not one row per vertex' % (name,))
+        if len(rows) != len(positions):
             raise DecimateError(
-                '%s has %d rows, POSITION has %d' % (name, len(value), len(positions))
+                '%s has %d rows, POSITION has %d' % (name, len(rows), len(positions))
             )
     return positions
 
@@ -99,25 +112,27 @@ def _reduce(
     """Build the mesh, run a schedule over it, and return what it did."""
     positions = _check(attributes)
     mesh = topology.build(positions, indices, options.weld_tolerance)
-    engine = _Engine(mesh, options)
+    engine = _Engine(mesh, options, exhaust=exhaust)
     if mesh.face_count:
-        limit = 0 if exhaust else engine.face_limit
         if options.schedule == 'heap' and native.ACCELERATED:
-            engine.run_native(limit)
+            engine.run_native(engine.face_limit)
         else:
             runner: Callable[[int], None] = (
                 engine.run_heap if options.schedule == 'heap' else engine.run_multiple_choice
             )
-            runner(limit)
+            runner(engine.face_limit)
     return engine.record(dict(attributes))
 
 
 class _Engine:
     """One reduction in progress: the surface, its quadrics, and the log."""
 
-    def __init__(self, mesh: Topology, options: SimplifyOptions) -> None:
+    def __init__(self, mesh: Topology, options: SimplifyOptions, exhaust: bool = False) -> None:
         self.mesh = mesh
         self.options = options
+        #: A recording run stops at nothing, so every target in ``options`` is
+        #: set aside here rather than half of them here and half in the loops.
+        self.exhaust = exhaust
         # A contraction moves positions and rewrites faces in place, so the
         # sequence has to be handed the surface as it was: replaying a prefix
         # starts from the input, not from wherever the reduction finished.
@@ -139,8 +154,8 @@ class _Engine:
             faces.reshape(-1), weights=np.repeat(areas, 3), minlength=mesh.vertex_count
         )
 
-        self.face_limit = self._face_limit()
-        self.error_limit = options.target_error
+        self.face_limit = 0 if exhaust else self._face_limit()
+        self.error_limit = None if exhaust else options.target_error
         self._dying: list[int] = []
         self._surviving: list[int] = []
         self._placement: list[Any] = []
@@ -170,6 +185,12 @@ class _Engine:
 
         With only an error budget there is no count to stop at, so the schedule
         runs until the budget stops it.
+
+        A ratio is a share of the triangles the *caller* handed in, not of what
+        is left after welding merged coincident vertices and dropped the
+        triangles that left with a repeated corner. On badly-exported or scanned
+        data those are not a rounding, and a caller asking for half of their
+        three hundred triangles means a hundred and fifty of them.
         """
         options = self.options
         if options.target_count is None and options.target_ratio is None:
@@ -178,7 +199,7 @@ class _Engine:
         if options.target_count is not None:
             limit = min(limit, options.target_count)
         if options.target_ratio is not None:
-            limit = min(limit, int(options.target_ratio * self.mesh.face_count))
+            limit = min(limit, int(options.target_ratio * self.mesh.input_faces))
         return limit
 
     def _border_constraints(self, position_noise: float, normal_noise: float) -> FloatArray:
@@ -365,8 +386,15 @@ class _Engine:
             for rank in np.argsort(deviation, kind='stable'):
                 if not np.isfinite(deviation[rank]):
                     break
+                # The budget filters candidates; it does not end the reduction.
+                # These are a few edges drawn at random out of thousands, so the
+                # cheapest of them is over budget long before the cheapest on the
+                # mesh is -- ending here would stop at whatever the draw happened
+                # to be, which is a different answer for every seed. A draw with
+                # nothing affordable in it counts as a failure, and it is the
+                # failure budget below that decides there is nothing left to do.
                 if self.error_limit is not None and deviation[rank] > self.error_limit:
-                    return
+                    break
                 left, right = int(pairs[rank, 0]), int(pairs[rank, 1])
                 if self.try_contract(left, right, placement[rank], float(deviation[rank])):
                     applied = True
@@ -398,6 +426,8 @@ class _Engine:
                 deviation=deviation,
                 removed_at=removed_at,
                 recompute_normals=self.options.recompute_normals,
+                origin=self.mesh.origin,
+                input_faces=self.mesh.input_faces,
             )
         count = len(self._dying)
         return CollapseSequence(
@@ -414,6 +444,8 @@ class _Engine:
             deviation=np.asarray(self._deviation, dtype='d'),
             removed_at=self.removed_at,
             recompute_normals=self.options.recompute_normals,
+            origin=self.mesh.origin,
+            input_faces=self.mesh.input_faces,
         )
 
 

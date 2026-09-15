@@ -1,0 +1,10 @@
+# What the sdist carries beyond the package itself.
+#
+# Setuptools' default template picks up `tests/test*.py` and nothing else under
+# `tests/`, which leaves out `tests/shapes.py` -- the meshes every test module
+# but `test_quadrics.py` imports by name. An sdist whose suite cannot be
+# collected is one a distribution packager cannot check before shipping it, so
+# the suite, its configuration and the documentation it cites all ship.
+recursive-include tests *.py
+include tox.ini
+recursive-include docs *.md

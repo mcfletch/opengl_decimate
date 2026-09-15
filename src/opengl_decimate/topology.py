@@ -30,9 +30,10 @@ from enum import IntEnum
 
 import numpy as np
 
+from opengl_decimate.spatial import NEIGHBOURHOOD, CellGrid
 from opengl_decimate.types import DecimateError, FloatArray, IndexArray
 
-__all__ = ['VertexClass', 'Topology', 'build', 'weld_positions']
+__all__ = ['VertexClass', 'Topology', 'build', 'weld_positions', 'local_origin']
 
 
 class VertexClass(IntEnum):
@@ -43,28 +44,10 @@ class VertexClass(IntEnum):
     LOCKED = 2
 
 
-class _DisjointSet:
-    """Union-find over a fixed range, for grouping points a tolerance welds.
-
-    No path compression, because the trees never get deep enough to want it:
-    :func:`weld_positions` unions in ascending order and always attaches the
-    larger root to the smaller, so every group ends up a star rooted at its
-    lowest member and a lookup is one hop.
-    """
-
-    def __init__(self, count: int) -> None:
-        self._parent = np.arange(count, dtype=np.int64)
-
-    def find(self, item: int) -> int:
-        parent = self._parent
-        while parent[item] != item:
-            item = int(parent[item])
-        return item
-
-    def union(self, left: int, right: int) -> None:
-        left_root, right_root = self.find(left), self.find(right)
-        if left_root != right_root:
-            self._parent[right_root] = left_root
+#: The cell offsets a partner can be in, taken once per unordered pair of cells:
+#: the lexicographically positive half of the twenty-seven. A point's own cell is
+#: handled separately, with a ``left < right`` filter.
+_HALF_NEIGHBOURHOOD = tuple(offset for offset in NEIGHBOURHOOD if offset > (0, 0, 0))
 
 
 def weld_positions(positions: FloatArray, tolerance: float = 0.0) -> tuple[FloatArray, IndexArray]:
@@ -80,6 +63,14 @@ def weld_positions(positions: FloatArray, tolerance: float = 0.0) -> tuple[Float
     cells of that size and joining across the twenty-seven cells a point can
     have a partner in.
 
+    Welding is transitive, so a run of points each near the next becomes one
+    even where its ends are further apart than the tolerance -- which is what a
+    seam reconstructed as a smear of points needs.
+
+    **Pick a tolerance smaller than the typical spacing between points.** The
+    work is the number of pairs that share a cell, so a tolerance that sweeps a
+    whole cluster into one cell costs the square of that cluster's size.
+
     >>> import numpy as np
     >>> points, belongs = weld_positions(np.array([[1.0, 0, 0], [0, 0, 0], [1.0, 0, 0]]))
     >>> belongs.tolist()
@@ -90,30 +81,64 @@ def weld_positions(positions: FloatArray, tolerance: float = 0.0) -> tuple[Float
         _, first, inverse = np.unique(positions, axis=0, return_index=True, return_inverse=True)
         return _by_first_appearance(positions, inverse.reshape(-1), len(first))
 
-    cells = np.floor(positions / tolerance).astype(np.int64)
-    buckets: dict[tuple[int, int, int], list[int]] = {}
-    for index, cell in enumerate(map(tuple, cells)):
-        buckets.setdefault(cell, []).append(index)
-
-    groups = _DisjointSet(len(positions))
-    offsets = [(x, y, z) for x in (-1, 0, 1) for y in (-1, 0, 1) for z in (-1, 0, 1)]
-    limit = tolerance * tolerance
-    for index, cell in enumerate(map(tuple, cells)):
-        for offset in offsets:
-            neighbours = buckets.get(
-                (cell[0] + offset[0], cell[1] + offset[1], cell[2] + offset[2])
-            )
-            if not neighbours:
-                continue
-            for other in neighbours:
-                if other > index:
-                    delta = positions[index] - positions[other]
-                    if float(delta @ delta) <= limit:
-                        groups.union(index, other)
-
-    roots = np.asarray([groups.find(i) for i in range(len(positions))], dtype=np.int64)
+    left, right = _close_pairs(positions, tolerance)
+    roots = _connected(left, right, len(positions))
     unique_roots, inverse = np.unique(roots, return_inverse=True)
     return _by_first_appearance(positions, inverse.reshape(-1), len(unique_roots), average=True)
+
+
+def _cells_of(positions: FloatArray, tolerance: float) -> IndexArray:
+    """Which cell of side ``tolerance`` each point falls in.
+
+    A tolerance so fine against these coordinates that the cell number will not
+    fit in an ``int64`` is refused rather than wrapped: it is also far below the
+    spacing ``float64`` can represent there, so nothing it could have merged is
+    distinguishable in the first place.
+    """
+    scaled = np.floor(positions / tolerance)
+    if not np.all(np.abs(scaled) < 2.0**62):
+        raise DecimateError(
+            'weld_tolerance %r is too fine for coordinates up to %r'
+            % (tolerance, float(np.abs(positions).max()))
+        )
+    return scaled.astype(np.int64)
+
+
+def _close_pairs(positions: FloatArray, tolerance: float) -> tuple[IndexArray, IndexArray]:
+    """Index pairs naming points within ``tolerance`` of each other.
+
+    Points are bucketed into cells of side ``tolerance``, so a partner can only
+    be in one of the twenty-seven cells around a point's own. Each of those is
+    one lookup into the occupied cells and one gather of that cell's members, so
+    every comparison is whole-array: the work is still the number of candidate
+    pairs, but the constant is NumPy's rather than Python's.
+    """
+    empty = np.zeros(0, dtype=np.int64)
+    if not len(positions):
+        return empty, empty
+
+    cells = _cells_of(positions, tolerance)
+    grid = CellGrid(cells)
+    limit = tolerance * tolerance
+    found: list[tuple[IndexArray, IndexArray]] = []
+    for offset in ((0, 0, 0),) + _HALF_NEIGHBOURHOOD:
+        for left, right in grid.members(cells + np.asarray(offset, dtype=np.int64)):
+            if offset == (0, 0, 0):
+                # A point's own cell offers every pair twice and every point
+                # against itself; the other offsets name each cell pair once.
+                keep = left < right
+                left, right = left[keep], right[keep]
+            delta = positions[left] - positions[right]
+            close = np.einsum('ij,ij->i', delta, delta) <= limit
+            if np.any(close):
+                found.append((left[close], right[close]))
+
+    if not found:
+        return empty, empty
+    return (
+        np.concatenate([pair[0] for pair in found]),
+        np.concatenate([pair[1] for pair in found]),
+    )
 
 
 def _by_first_appearance(
@@ -145,12 +170,57 @@ def _by_first_appearance(
     return points, renumbered
 
 
+def local_origin(points: FloatArray) -> FloatArray:
+    """Where to put the origin so a quadric keeps its digits.
+
+    A plane quadric's constant term is ``(n.p)**2``, taken from the point's
+    coordinates as they stand. A model at Earth-centred coordinates -- ``p``
+    around 6.4e6, which is what 3D Tiles and any ECEF-referenced world uses --
+    gives a constant around 4e13, while the squared distance the quadric exists
+    to report is around 1e-6. That is nineteen decimal digits of range inside a
+    type that carries sixteen, and the cancellation takes the answer with it:
+    at that scale the metric's own noise floor is 0.147 model units, which is
+    larger than most level-of-detail budgets before a triangle has been removed.
+
+    Working about the model's own bounding-box centre costs one subtraction per
+    point and puts the whole computation back where ``float64`` has the digits.
+
+    The shift is taken on an axis only where the model sits at least twice its
+    own half-extent from the origin. That is where absolute coordinates cost
+    something, and it is also exactly where subtracting the centre and adding it
+    back are both exact operations -- Sterbenz's lemma gives ``p - o`` exactly
+    for ``o/2 <= p <= 2o``, and the sum of an exact difference and ``o`` is
+    ``p``, which is representable. So a model near the origin is left where it
+    is rather than moved by a rounding on account of a problem it does not have.
+
+    >>> import numpy as np
+    >>> local_origin(np.array([[-1.0, 0, 0], [1.0, 2.0, 0]])).tolist()
+    [0.0, 0.0, 0.0]
+    >>> local_origin(np.array([[6.4e6, 0, 0], [6.4e6 + 1.0, 0, 0]])).tolist()
+    [6400000.5, 0.0, 0.0]
+    """
+    points = np.asarray(points, dtype='d')
+    if not len(points):
+        return np.zeros(3, dtype='d')
+    low, high = np.min(points, axis=0), np.max(points, axis=0)
+    centre = 0.5 * (low + high)
+    half_extent = 0.5 * (high - low)
+    return np.where(np.abs(centre) >= 2.0 * half_extent, centre, 0.0)
+
+
 class Topology:
     """A welded surface, its adjacency, and the faces still alive on it.
 
     ``positions`` are the welded points and are moved in place by a collapse;
     ``faces`` holds position indices and ``corners`` the vertex each of those
     came from, so an attribute follows its corner rather than its point.
+
+    Positions are held **relative to** ``origin``, which :func:`build` takes
+    from the model's own bounding box -- see :func:`local_origin` for why, and
+    for the rule that leaves it at zero for a model near the origin. Adding
+    ``origin`` back is what
+    :meth:`~opengl_decimate.sequence.CollapseSequence.state` does before handing
+    positions to a caller.
     """
 
     def __init__(
@@ -159,12 +229,20 @@ class Topology:
         faces: IndexArray,
         corners: IndexArray,
         vertex_point: IndexArray,
+        origin: FloatArray | None = None,
+        input_faces: int | None = None,
     ) -> None:
         self.positions = np.ascontiguousarray(positions, dtype='d')
+        #: What ``positions`` are measured from; zero for a model near it.
+        self.origin = np.zeros(3, dtype='d') if origin is None else np.asarray(origin, dtype='d')
         self.faces = np.ascontiguousarray(faces, dtype=np.int64)
         self.corners = np.ascontiguousarray(corners, dtype=np.int64)
         #: Which welded point each *input* vertex went to.
         self.vertex_point = np.ascontiguousarray(vertex_point, dtype=np.int64)
+        #: Triangles the caller handed in, before welding dropped any. A ratio
+        #: is a share of these, which is what a caller counted; ``face_count``
+        #: is what is left to work on.
+        self.input_faces = len(self.faces) if input_faces is None else int(input_faces)
         #: False once a collapse has removed the face.
         self.alive = np.ones(len(self.faces), dtype=bool)
         # Kept as a running total rather than counted on demand: a reduction
@@ -272,7 +350,9 @@ class Topology:
 
         ``lock_boundary`` holds the surface's border where it is, which is what a
         cluster group's simplification needs so its neighbours still meet it.
-        ``locked`` names further points to hold.
+        ``locked`` names further points to hold -- by *welded point*, which is
+        where the count to check it against lives, and which is why the check is
+        here rather than with the rest of the option validation.
         """
         kinds = np.full(self.vertex_count, VertexClass.MANIFOLD, dtype=np.int8)
         faces = self.live_faces()
@@ -305,7 +385,13 @@ class Topology:
         if lock_boundary:
             kinds[kinds == VertexClass.BORDER] = VertexClass.LOCKED
         if locked is not None:
-            kinds[np.asarray(locked, dtype=np.int64)] = VertexClass.LOCKED
+            held = np.asarray(locked, dtype=np.int64)
+            if held.size and int(held.max()) >= self.vertex_count:
+                raise DecimateError(
+                    'locked index %d is past the end: the mesh has %d welded points'
+                    % (int(held.max()), self.vertex_count)
+                )
+            kinds[held] = VertexClass.LOCKED
         return kinds
 
 
@@ -404,10 +490,23 @@ def build(positions: FloatArray, indices: IndexArray, tolerance: float = 0.0) ->
     Vertices sharing a position are welded, and a triangle left with a repeated
     corner by that welding is dropped: it covers no area, so it describes no
     surface and its plane is undefined.
+
+    The welded points are held relative to :func:`local_origin`, so a model far
+    from the origin is measured where ``float64`` still has the digits to
+    measure it in.
     """
     positions = np.asarray(positions)
     if positions.ndim != 2 or positions.shape[1] != 3:
         raise DecimateError('positions must be (n, 3), got %r' % (positions.shape,))
+    # A NaN or an infinity here is accepted by every operation downstream and
+    # comes out the far end in the result, with a reported error of zero, so it
+    # has to be refused where it arrives.
+    finite = np.isfinite(positions).all(axis=1)
+    if not finite.all():
+        raise DecimateError(
+            'positions must all be finite: row %d is %r'
+            % (int(np.argmin(finite)), positions[int(np.argmin(finite))].tolist())
+        )
     flat = np.asarray(indices).reshape(-1)
     if len(flat) % 3:
         raise DecimateError('indices must be a multiple of three, got %d' % (len(flat),))
@@ -419,8 +518,16 @@ def build(positions: FloatArray, indices: IndexArray, tolerance: float = 0.0) ->
         )
 
     points, vertex_point = weld_positions(positions, tolerance)
+    origin = local_origin(points)
     faces = vertex_point[corners]
     usable = (
         (faces[:, 0] != faces[:, 1]) & (faces[:, 1] != faces[:, 2]) & (faces[:, 0] != faces[:, 2])
     )
-    return Topology(points, faces[usable], corners[usable], vertex_point)
+    return Topology(
+        points - origin,
+        faces[usable],
+        corners[usable],
+        vertex_point,
+        origin,
+        input_faces=len(corners),
+    )

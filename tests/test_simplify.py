@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import shapes
 
-from opengl_decimate import SimplifyOptions, simplify
+from opengl_decimate import SimplifyOptions, quadrics, simplify, topology
 from opengl_decimate.types import DecimateError
 
 
@@ -30,6 +30,22 @@ def _closed(positions, indices):
     _, counts = np.unique(pairs, axis=0, return_counts=True)
     del positions
     return bool(np.all(counts == 2))
+
+
+def _three_hundred_with_a_hundred_that_weld_away():
+    """A 300-triangle mesh, 100 of whose triangles cover no area.
+
+    Each of the hundred repeats a corner, so welding drops it: it describes no
+    surface and has no plane for a quadric to use.
+    """
+    positions, faces = shapes.grid(11)
+    faces = np.asarray(faces, dtype=np.int64).reshape(-1, 3)
+    slivers = np.stack(
+        [np.arange(100), np.arange(100), np.arange(1, 101)],
+        axis=1,
+    )
+    both = np.concatenate([faces, slivers]).astype(np.uint32).reshape(-1)
+    return positions, both
 
 
 def _signed_volume(positions, indices):
@@ -57,6 +73,22 @@ class TestTargets:
         tight = simplify({'POSITION': positions}, indices, SimplifyOptions(target_error=0.002))
         loose = simplify({'POSITION': positions}, indices, SimplifyOptions(target_error=0.05))
         assert _triangles(tight) > _triangles(loose)
+
+    def test_a_ratio_is_a_share_of_the_input_triangles_not_of_what_welding_left(self):
+        """Welding drops triangles before the reduction sees them.
+
+        A caller asking for half of their three hundred triangles means a
+        hundred and fifty of them, whatever welding merged first -- and on
+        scanned or badly-exported data what welding merges is not a rounding.
+        """
+        positions, indices = _three_hundred_with_a_hundred_that_weld_away()
+        assert len(indices) // 3 == 300
+        result = simplify({'POSITION': positions}, indices, SimplifyOptions(target_ratio=0.5))
+        assert result.input_triangles == 300
+        assert result.welded_away == 100
+        # A contraction removes up to two faces, so the count lands on the limit
+        # or one below it, never above.
+        assert 149 <= _triangles(result) <= 150
 
     def test_a_target_is_required(self):
         with pytest.raises(DecimateError, match='target'):
@@ -206,6 +238,42 @@ class TestAttributes:
         outward = np.einsum('ij,ij->i', out['NORMAL'].astype('d'), out['POSITION'].astype('d'))
         assert np.all(outward > 0.5)
 
+    def test_a_texture_seam_does_not_become_a_shading_seam(self):
+        """Recomputed normals are accumulated per point, not per output vertex.
+
+        An output vertex is split by *attributes*, so a texture seam splits one.
+        Accumulating there would give each side of the split only the faces on
+        its own side -- turning a seam with no geometric meaning at all into a
+        crease in the shading.
+        """
+        positions, indices = shapes.icosphere(4)
+        seam = np.stack(
+            [(positions[:, 0] > 0).astype('f4'), np.zeros(len(positions), dtype='f4')], axis=1
+        )
+        options = SimplifyOptions(target_ratio=0.3, recompute_normals=True)
+
+        def worst_angle(attributes):
+            result = simplify(attributes, indices, options)
+            out = result.attributes['POSITION'].astype('d')
+            truth = out / np.linalg.norm(out, axis=1)[:, None]
+            cosine = np.clip(np.einsum('ij,ij->i', result.attributes['NORMAL'], truth), -1.0, 1.0)
+            return float(np.degrees(np.arccos(cosine)).max())
+
+        plain = worst_angle({'POSITION': positions})
+        seamed = worst_angle({'POSITION': positions, 'TEXCOORD_0': seam})
+        assert seamed == pytest.approx(plain, abs=1e-6)
+
+    def test_recomputed_normals_are_added_where_the_input_had_none(self):
+        positions, indices = shapes.icosphere(2)
+        result = simplify(
+            {'POSITION': positions},
+            indices,
+            SimplifyOptions(target_ratio=0.5, recompute_normals=True),
+        )
+        normals = result.attributes['NORMAL']
+        assert normals.shape == result.attributes['POSITION'].shape
+        assert np.linalg.norm(normals, axis=1) == pytest.approx(1.0, abs=1e-5)
+
     def test_the_vertex_map_points_every_input_vertex_at_an_output_vertex(self):
         positions, indices = shapes.icosphere(2)
         result = simplify({'POSITION': positions}, indices, SimplifyOptions(target_ratio=0.3))
@@ -295,6 +363,60 @@ class TestPlacement:
             SimplifyOptions(target_ratio=0.5, placement='wherever')
 
 
+class TestAModelFarFromTheOrigin:
+    """A georeferenced world hands in coordinates around 6.4e6.
+
+    A plane quadric's constant term is the squared plane offset, so in absolute
+    coordinates at that scale it carries nineteen decimal digits of range in a
+    type that holds sixteen. Accumulating about the model's own bounding-box
+    centre puts it back inside the type, and the shift is exact, so the answer
+    does not merely improve -- it stops depending on where the model is.
+    """
+
+    @pytest.mark.parametrize('shift', [0.0, 1e2, 1e4, 1e6, 6.4e6])
+    def test_the_reduction_does_not_depend_on_where_the_model_is(self, shift):
+        positions, indices = shapes.icosphere(4)
+        here = positions.astype('d')
+        there = here + np.asarray([shift, 0.0, 0.0])
+        first = simplify({'POSITION': here}, indices, SimplifyOptions(target_ratio=0.1))
+        second = simplify({'POSITION': there}, indices, SimplifyOptions(target_ratio=0.1))
+        assert _triangles(second) == _triangles(first)
+        assert second.error == pytest.approx(first.error, rel=1e-12)
+        assert np.array_equal(second.indices, first.indices)
+        moved = second.attributes['POSITION'] - np.asarray([shift, 0.0, 0.0])
+        assert moved == pytest.approx(first.attributes['POSITION'], abs=1e-9)
+
+    def test_the_quadrics_still_score_their_own_points_at_zero(self):
+        """The metric's own noise floor, which is what the digits buy.
+
+        A vertex quadric evaluated at the vertex it was accumulated from is the
+        summed distance from that point to planes that all pass through it, so
+        it is zero. How far from zero it comes back is the floor below which no
+        error the metric reports means anything.
+        """
+        positions, indices = shapes.icosphere(3)
+        far = positions.astype('d') + np.asarray([6.4e6, 0.0, 0.0])
+        mesh = topology.build(far, indices)
+        faces = mesh.live_faces()
+        accumulated = quadrics.accumulate(
+            quadrics.triangle_quadrics(mesh.positions, faces), faces, mesh.vertex_count
+        )
+        worst = float(np.max(np.abs(quadrics.evaluate(accumulated, mesh.positions))))
+        assert worst < 1e-15
+
+    def test_a_float64_mesh_comes_back_float64(self):
+        """A float32 ulp at 6.4e6 is half a metre, so narrowing would undo it."""
+        positions, indices = shapes.icosphere(2)
+        far = positions.astype('d') + np.asarray([6.4e6, 0.0, 0.0])
+        result = simplify({'POSITION': far}, indices, SimplifyOptions(target_ratio=0.5))
+        assert result.attributes['POSITION'].dtype == np.dtype('f8')
+
+    def test_a_float32_mesh_still_comes_back_float32(self):
+        positions, indices = shapes.icosphere(2)
+        result = simplify({'POSITION': positions}, indices, SimplifyOptions(target_ratio=0.5))
+        assert result.attributes['POSITION'].dtype == np.dtype('f4')
+
+
 class TestProbabilisticMetric:
     def test_it_reaches_the_target_too(self):
         positions, indices = shapes.icosphere(3)
@@ -306,17 +428,79 @@ class TestProbabilisticMetric:
         assert _triangles(result) <= 0.25 * (len(indices) // 3)
 
     def test_it_survives_a_noisy_surface(self):
-        """A scan is a sphere plus noise; the reduction must still be a sphere."""
+        """A scan is a sphere plus noise; the reduction must still be a sphere.
+
+        Named through ``normal_noise``, because that is the term that makes the
+        metric behave differently at all -- see the tests below.
+        """
         positions, indices = shapes.icosphere(3)
         rng = np.random.default_rng(4)
         noisy = positions.astype('d') * (1.0 + rng.normal(scale=0.01, size=(len(positions), 1)))
         result = simplify(
             {'POSITION': noisy.astype('f4')},
             indices,
-            SimplifyOptions(target_ratio=0.25, metric='probabilistic', position_noise=0.01),
+            SimplifyOptions(target_ratio=0.25, metric='probabilistic', normal_noise=0.01),
         )
         radii = np.linalg.norm(result.attributes['POSITION'].astype('d'), axis=1)
         assert np.max(np.abs(radii - 1.0)) < 0.06
+
+    def test_naming_one_noise_does_not_zero_the_other(self):
+        """Both default on their own, so a caller gets what they asked for plus
+        what they did not ask about, rather than plus nothing."""
+        assert SimplifyOptions(target_ratio=0.5, metric='probabilistic').noise(1.0) == (
+            0.001,
+            0.001,
+        )
+        assert SimplifyOptions(target_ratio=0.5, metric='probabilistic', position_noise=0.01).noise(
+            1.0
+        ) == (0.01, 0.001)
+        assert SimplifyOptions(target_ratio=0.5, metric='probabilistic', normal_noise=0.01).noise(
+            1.0
+        ) == (0.001, 0.01)
+        # An explicit zero is a zero, which `None` as the default is what makes
+        # expressible at all.
+        assert SimplifyOptions(target_ratio=0.5, metric='probabilistic', normal_noise=0.0).noise(
+            1.0
+        ) == (0.001, 0.0)
+
+    def test_the_normal_noise_is_what_makes_the_metric_different(self):
+        """`position_noise` adds a constant to every cost, so it cannot reorder.
+
+        It raises the deviation the reduction reports and changes nothing about
+        which contraction is chosen -- so with the normal noise at zero, the
+        probabilistic metric *is* the classical one, bit for bit. Worth pinning,
+        because a caller reading only the `position_noise` row would otherwise
+        believe they had switched metric.
+        """
+        positions, indices = shapes.icosphere(3)
+        rng = np.random.default_rng(4)
+        noisy = (
+            positions.astype('d') * (1.0 + rng.normal(scale=0.01, size=(len(positions), 1)))
+        ).astype('f4')
+        classical = simplify({'POSITION': noisy}, indices, SimplifyOptions(target_ratio=0.25))
+        flat = simplify(
+            {'POSITION': noisy},
+            indices,
+            SimplifyOptions(
+                target_ratio=0.25, metric='probabilistic', position_noise=0.01, normal_noise=0.0
+            ),
+        )
+        assert np.array_equal(flat.indices, classical.indices)
+        assert np.array_equal(flat.attributes['POSITION'], classical.attributes['POSITION'])
+
+        conditioned = simplify(
+            {'POSITION': noisy},
+            indices,
+            SimplifyOptions(target_ratio=0.25, metric='probabilistic', normal_noise=0.01),
+        )
+        assert not np.array_equal(conditioned.indices, classical.indices)
+
+    def test_only_the_normal_noise_conditions_the_solve(self):
+        """One plane leaves a plane of equally good points until `A` is full rank."""
+        plane = (np.asarray([[0.0, 1.0, 0.0]]), np.asarray([[0.0, 2.0, 0.0]]))
+        assert not quadrics.minimize(quadrics.plane_quadric(*plane))[1][0]
+        assert not quadrics.minimize(quadrics.plane_quadric(*plane, position_noise=0.01))[1][0]
+        assert quadrics.minimize(quadrics.plane_quadric(*plane, normal_noise=0.01))[1][0]
 
 
 class TestRefusedOptions:
@@ -331,6 +515,64 @@ class TestRefusedOptions:
     def test_asking_for_no_candidates_is_refused(self):
         with pytest.raises(DecimateError, match='candidates'):
             SimplifyOptions(target_ratio=0.5, candidates=0)
+
+    @pytest.mark.parametrize(
+        ('named', 'says'),
+        [
+            pytest.param({'position_noise': -1.0}, 'position_noise', id='position_noise'),
+            pytest.param({'normal_noise': -1.0}, 'normal_noise', id='normal_noise'),
+            pytest.param({'max_normal_flip': 1e9}, 'max_normal_flip', id='flip-past-180'),
+            pytest.param({'max_normal_flip': -1.0}, 'max_normal_flip', id='flip-negative'),
+            # Documented as 0 to 1; above 1 nothing can satisfy it, so the
+            # reduction silently does nothing at all.
+            pytest.param({'min_triangle_quality': 5.0}, 'min_triangle_quality', id='quality'),
+            pytest.param({'weld_tolerance': -1.0}, 'weld_tolerance', id='weld'),
+            pytest.param({'boundary_weight': -3.0}, 'boundary_weight', id='boundary'),
+            pytest.param(
+                {'certify': True, 'certify_samples': 0}, 'certify_samples', id='no-samples'
+            ),
+            # NumPy would wrap this round and lock the *last* point instead.
+            pytest.param({'locked': [-1]}, 'locked', id='locked-negative'),
+            pytest.param({'locked': [[0, 1]]}, 'locked', id='locked-nested'),
+            pytest.param({'locked': [0.5]}, 'locked', id='locked-not-integers'),
+        ],
+    )
+    def test_an_option_outside_its_range_is_refused(self, named, says):
+        with pytest.raises(DecimateError, match=says):
+            SimplifyOptions(target_ratio=0.5, **named)
+
+
+class TestRefusedInput:
+    def test_a_locked_index_past_the_end_is_refused(self):
+        positions, indices = shapes.octahedron()
+        with pytest.raises(DecimateError, match='6 welded points'):
+            simplify(
+                {'POSITION': positions}, indices, SimplifyOptions(target_ratio=0.5, locked=[99])
+            )
+
+    def test_the_message_counts_welded_points_not_the_callers_vertices(self):
+        """A hard-edged cube is 24 vertices over 8 points, and `locked` is by point."""
+        attributes, indices = shapes.cube_with_hard_normals()
+        with pytest.raises(DecimateError, match='8 welded points'):
+            simplify(attributes, indices, SimplifyOptions(target_ratio=0.5, locked=[20]))
+
+    @pytest.mark.parametrize('bad', [np.nan, np.inf, -np.inf], ids=['nan', 'inf', '-inf'])
+    def test_a_position_that_is_not_finite_is_refused(self, bad):
+        """It is accepted by everything downstream and reaches the output."""
+        positions, indices = shapes.octahedron()
+        broken = positions.astype('d')
+        broken[2, 1] = bad
+        with pytest.raises(DecimateError, match='row 2'):
+            simplify({'POSITION': broken}, indices, SimplifyOptions(target_ratio=0.5))
+
+    def test_an_attribute_that_is_not_an_array_is_refused(self):
+        positions, indices = shapes.octahedron()
+        with pytest.raises(DecimateError, match='WEIGHT'):
+            simplify(
+                {'POSITION': positions, 'WEIGHT': np.float32(1.0)},
+                indices,
+                SimplifyOptions(target_ratio=0.5),
+            )
 
 
 class TestSamplingCorners:
@@ -347,6 +589,34 @@ class TestSamplingCorners:
             SimplifyOptions(target_error=0.05, schedule='multiple-choice'),
         )
         assert _triangles(tight) > _triangles(loose)
+
+    def test_the_budget_filters_candidates_rather_than_ending_the_reduction(self):
+        """A draw with nothing affordable in it is a failed draw, not the end.
+
+        Eight edges are sampled out of thousands, so the cheapest of the eight
+        is over budget long before the cheapest on the mesh is. Stopping there
+        would end wherever the draw happened to fall -- which is a different
+        answer for every seed and several times too many triangles. So the
+        sampled reduction has to land near where the heap does, and has to land
+        in the same place whatever the seed.
+        """
+        positions, indices = shapes.icosphere(3)
+        heap = _triangles(
+            simplify({'POSITION': positions}, indices, SimplifyOptions(target_error=0.02))
+        )
+        sampled = [
+            _triangles(
+                simplify(
+                    {'POSITION': positions},
+                    indices,
+                    SimplifyOptions(target_error=0.02, schedule='multiple-choice', seed=seed),
+                )
+            )
+            for seed in range(8)
+        ]
+        assert min(sampled) >= heap
+        assert max(sampled) < 1.5 * heap
+        assert max(sampled) - min(sampled) < 0.25 * heap
 
     def test_the_sampling_schedule_stops_when_nothing_is_left_to_do(self):
         """Every remaining pair has both ends locked, so no draw can succeed."""

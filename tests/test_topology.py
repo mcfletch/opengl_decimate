@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import shapes
 
-from opengl_decimate import topology
+from opengl_decimate import SimplifyOptions, collapse_sequence, topology
 from opengl_decimate.types import DecimateError
 
 
@@ -62,6 +62,45 @@ class TestBuild:
     def test_positions_must_be_three_dimensional(self):
         with pytest.raises(DecimateError, match=r'\(n, 3\)'):
             topology.build(np.zeros((3, 2), dtype='f4'), np.asarray([0, 1, 2], dtype=np.uint32))
+
+
+class TestTheLocalOrigin:
+    """Where the quadrics are accumulated from, and why it is not always zero."""
+
+    def test_a_model_around_the_origin_is_left_where_it_is(self):
+        mesh = topology.build(*shapes.icosphere(1))
+        assert mesh.origin.tolist() == [0.0, 0.0, 0.0]
+
+    def test_a_model_far_from_the_origin_is_measured_from_its_own_centre(self):
+        positions, indices = shapes.icosphere(1)
+        far = positions.astype('d') + np.asarray([6.4e6, 0.0, 0.0])
+        mesh = topology.build(far, indices)
+        # Shifted on X, where the model is far from the origin relative to its
+        # size, and left alone on Y and Z, where it is not.
+        assert mesh.origin[0] == pytest.approx(6.4e6, abs=1.0)
+        assert mesh.origin[1] == 0.0
+        assert mesh.origin[2] == 0.0
+
+    @pytest.mark.parametrize('shift', [1e3, 1e6, 6.4e6, -6.4e6, 1e12])
+    def test_the_shift_and_the_shift_back_are_both_exact(self, shift):
+        """The reason for the rule: no model pays a rounding for the fix.
+
+        The shift is taken only where the model sits at least twice its own
+        half-extent from the origin, which is the condition under which
+        Sterbenz's lemma makes the subtraction exact -- and an exact difference
+        added back to what it was taken from is the original, exactly.
+        """
+        points = np.linspace(-1.0, 1.0, 97)[:, None] * np.asarray([1.0, 0.5, 0.25])
+        points = points + np.asarray([shift, 0.0, 0.0])
+        origin = topology.local_origin(points)
+        assert np.array_equal((points - origin) + origin, points)
+
+    def test_state_hands_positions_back_in_the_callers_coordinates(self):
+        positions, indices = shapes.icosphere(1)
+        far = positions.astype('d') + np.asarray([6.4e6, 0.0, 0.0])
+        sequence = collapse_sequence({'POSITION': far}, indices, SimplifyOptions(target_ratio=0.5))
+        held, _roots, _faces, _corners = sequence.state(0)
+        assert held == pytest.approx(far[: len(held)], abs=1e-9)
 
 
 class TestAdjacency:
@@ -156,19 +195,24 @@ class TestFanConnectivity:
         assert kinds[0] == topology.VertexClass.LOCKED
         assert np.all(kinds[1:] == topology.VertexClass.MANIFOLD)
 
-    def test_classification_keeps_up_with_a_large_mesh(self):
-        """A scan is millions of triangles; classification is one pass over it.
+    def test_classifying_a_large_mesh_never_walks_it_point_by_point(self):
+        """A scan is millions of triangles, and a set per point is what stops it.
 
-        The bound is loose enough not to measure the machine, and far below what
-        a per-corner Python pass costs at this size.
+        Classification is whole-array work over the face list, so the structure
+        a point-by-point walk would need -- a Python set per point, hundreds of
+        bytes each before it holds anything -- is never built. Asserted by
+        asking whether it was built rather than by timing the pass, so it is a
+        fact about the code rather than about the machine.
         """
-        import time
-
         mesh = topology.build(*shapes.grid(300))
         assert mesh.face_count > 175_000
-        start = time.perf_counter()
-        mesh.classify()
-        assert time.perf_counter() - start < 0.5
+        kinds = mesh.classify()
+        assert not mesh.adjacency_built
+        # And it is the right answer at that size, not merely a fast one: the
+        # rim of the patch is border, and everything inside it is manifold.
+        on_rim = np.any(np.abs(mesh.positions[:, [0, 2]]) >= 1.0, axis=1)
+        assert np.all(kinds[on_rim] == topology.VertexClass.BORDER)
+        assert np.all(kinds[~on_rim] == topology.VertexClass.MANIFOLD)
 
 
 class TestToleranceWeldChains:
@@ -187,6 +231,42 @@ class TestToleranceWeldChains:
         welded = topology.build(positions, indices, tolerance=step * 1.5)
         # The five stepping points are one; the far two are themselves.
         assert welded.vertex_count == 3
+
+    def test_a_cluster_that_lands_in_one_cell_is_still_welded_whole(self):
+        """The case a bad tolerance produces, and the one that used to hang.
+
+        Every point here is within the tolerance of every other, so the cell
+        holding them offers the square of its size in candidate pairs. The
+        answer is one point; getting there is the part that has to stay
+        whole-array and has to bound the memory it asks for.
+        """
+        rng = np.random.default_rng(0)
+        points = rng.normal(scale=1e-9, size=(4000, 3))
+        welded, belongs = topology.weld_positions(points, tolerance=1e-6)
+        assert len(welded) == 1
+        assert np.all(belongs == 0)
+
+    def test_a_tolerance_weld_of_nothing_is_nothing(self):
+        welded, belongs = topology.weld_positions(np.zeros((0, 3)), tolerance=1e-6)
+        assert welded.shape == (0, 3)
+        assert belongs.shape == (0,)
+
+    def test_a_tolerance_finer_than_the_coordinates_can_carry_is_refused(self):
+        """Below the float64 spacing there, nothing it could merge is distinct."""
+        points = np.asarray([(0.0, 0.0, 0.0), (1e6, 5e5, 3e5)])
+        with pytest.raises(DecimateError, match='weld_tolerance'):
+            topology.weld_positions(points, tolerance=1e-18)
+
+    def test_a_fine_tolerance_on_a_large_model_still_welds(self):
+        """The grid is then too big to pack a cell into one integer.
+
+        Cell coordinates are compared as rows instead of as a packed key, which
+        is slower and is the only thing that is correct at that span.
+        """
+        points = np.asarray([(0.0, 0.0, 0.0), (5e-13, 0.0, 0.0), (1e6, 5e5, 3e5)])
+        welded, belongs = topology.weld_positions(points, tolerance=1e-12)
+        assert len(welded) == 2
+        assert belongs.tolist() == [0, 0, 1]
 
     def test_the_welded_point_sits_at_the_middle_of_its_run(self):
         step = 4e-6
