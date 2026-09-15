@@ -111,7 +111,8 @@ The fewest contractions satisfying the targets, without building the mesh.
 
 The mesh after `steps` contractions, in the package's internal form: welded point
 positions, the point each original point has become, and the live faces with the
-input vertex each corner came from.
+input vertex each corner reads its attributes from — which is a vertex measured
+where the corner now sits, not the vertex it started as.
 
 ## `opengl_decimate.certify`
 
@@ -134,10 +135,16 @@ A mesh with no triangles is infinitely far from everywhere.
 
 ## `opengl_decimate.topology`
 
-### `build(positions, indices, tolerance=0.0) -> Topology`
+### `build(positions, indices, tolerance=0.0, drop_below=0.0, carried=None) -> Topology`
 
 The welded surface. `Topology.classify(lock_boundary=False, locked=None)` returns
 a `VertexClass` per point: `MANIFOLD`, `BORDER` or `LOCKED`.
+
+`drop_below` removes whole connected components smaller than that share of the
+model's bounding-box diagonal; the largest is never dropped. `carried` is what
+the vertices hold besides their positions, read only to fill `Topology.copies` —
+how many different sets of values each point is drawn with, which is where the
+surface's seams are. Without it every point counts as drawn once.
 
 `Topology.positions` are held relative to `Topology.origin` — see
 `local_origin` below. `CollapseSequence.state` adds it back, so a caller of
@@ -191,6 +198,16 @@ What that covers:
   classified, since that is where the point count is known. The count in the
   message is of *welded points*, which is fewer than the caller's vertices
   wherever vertices were welded.
+
+## `opengl_decimate.corners`
+
+Which vertex a corner reads its attributes from, once its point has moved.
+`copies_per_point(vertex_point, corners, attributes, point_count)` counts how
+many different sets of carried values each point is drawn with — one almost
+everywhere, two where a seam runs. `corner_moves(...)` records, for each
+contraction, which copies it lets go and which they hand over to, and `follow`
+closes a prefix of those moves by pointer-jumping. `CollapseSequence` does all
+three; a caller of `simplify` or `at()` never meets them.
 
 ## `opengl_decimate.spatial`
 

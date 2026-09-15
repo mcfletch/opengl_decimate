@@ -80,6 +80,13 @@ class SimplifyOptions:
         (equilateral only).
     :param placement: one of :data:`PLACEMENTS`.
     :param weld_tolerance: merge input vertices within this distance first.
+    :param drop_components_below: remove whole connected pieces smaller than
+        this share of the model's bounding-box diagonal, before reducing. A
+        scan arrives with the subject and whatever else was in the room, and
+        every crumb is a closed shell with a floor of four triangles -- so a
+        target of a few hundred is spent on crumbs unless they go. ``0.01`` is
+        about a pixel where the whole model covers a hundred. The largest piece
+        is never dropped.
     :param schedule: one of :data:`SCHEDULES`.
     :param candidates: how many edges ``multiple-choice`` samples per step.
     :param seed: fixes the sampling, so a run is reproducible.
@@ -111,6 +118,7 @@ class SimplifyOptions:
     min_triangle_quality: float = 0.0
     placement: str = 'optimal'
     weld_tolerance: float = 0.0
+    drop_components_below: float = 0.0
     schedule: str = 'heap'
     candidates: int = 8
     seed: int = 0
@@ -156,6 +164,11 @@ class SimplifyOptions:
         if not self.weld_tolerance >= 0.0:
             raise DecimateError(
                 'weld_tolerance must not be negative, got %r' % (self.weld_tolerance,)
+            )
+        if not self.drop_components_below >= 0.0:
+            raise DecimateError(
+                'drop_components_below is a share of the model and must not be negative,'
+                ' got %r' % (self.drop_components_below,)
             )
         if not self.boundary_weight >= 0.0:
             raise DecimateError(

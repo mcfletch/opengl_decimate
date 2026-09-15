@@ -316,3 +316,76 @@ class TestAdjacencyIsNotBuiltUntilItIsWanted:
         mesh = topology.build(*shapes.grid(120))
         mesh.classify()
         assert mesh.adjacency_built is False
+
+
+class TestDroppingWhatIsTooSmallToSee:
+    """A speck that will never cover a pixel is not worth a triangle.
+
+    A scan arrives with the subject and whatever else was in the room: crumbs
+    of geometry the reconstruction could not attach to anything. Each is its own
+    closed shell with a floor of its own, so a reduction asked for a few hundred
+    triangles spends some of them there instead of on the subject.
+    """
+
+    def _speckled(self):
+        """A grid, plus three tetrahedra a thousandth of its size."""
+        positions, indices = shapes.grid(9)
+        points = [positions.astype('d')]
+        faces = [np.asarray(indices, dtype=np.int64).reshape(-1, 3)]
+        offset = len(positions)
+        for step, where in enumerate(((3.0, 0.0, 0.0), (0.0, 3.0, 0.0), (0.0, 0.0, 3.0))):
+            corners, speck = shapes.tetrahedron()
+            points.append(corners.astype('d') * 0.001 + np.asarray(where))
+            faces.append(np.asarray(speck, dtype=np.int64).reshape(-1, 3) + offset)
+            offset += len(corners)
+            del step
+        return (
+            np.concatenate(points).astype('f4'),
+            np.concatenate(faces).astype(np.uint32).reshape(-1),
+        )
+
+    def test_the_specks_are_their_own_components(self):
+        positions, indices = self._speckled()
+        mesh = topology.build(positions, indices)
+        labels = topology.components(mesh.live_faces(), mesh.vertex_count)
+        used = np.zeros(mesh.vertex_count, dtype=bool)
+        used[mesh.live_faces().reshape(-1)] = True
+        assert len(np.unique(labels[used])) == 4
+
+    def test_a_component_is_labelled_across_all_three_edges_of_a_face(self):
+        """Two triangles sharing only the edge no walk of one edge would take."""
+        positions = np.asarray([(0.0, 0, 0), (1.0, 0, 0), (0.0, 1.0, 0), (1.0, 1.0, 0)], dtype='f4')
+        mesh = topology.build(positions, np.asarray([0, 1, 2, 2, 1, 3], dtype=np.uint32))
+        labels = topology.components(mesh.live_faces(), mesh.vertex_count)
+        assert len(set(labels[mesh.live_faces().reshape(-1)].tolist())) == 1
+
+    def test_dropping_removes_the_specks_and_keeps_the_subject(self):
+        positions, indices = self._speckled()
+        whole = topology.build(positions, indices)
+        pruned = topology.build(positions, indices, drop_below=0.01)
+        assert pruned.face_count == whole.face_count - 12
+        assert pruned.dropped_faces == 12
+
+    def test_what_is_kept_is_measured_against_the_whole_model(self):
+        """A share of the model's own size, so it means the same at any scale."""
+        positions, indices = self._speckled()
+        big = topology.build(positions * 1000.0, indices, drop_below=0.01)
+        small = topology.build(positions * 0.001, indices, drop_below=0.01)
+        assert big.face_count == small.face_count
+
+    def test_dropping_nothing_is_the_default(self):
+        positions, indices = self._speckled()
+        assert topology.build(positions, indices).dropped_faces == 0
+
+    def test_a_share_large_enough_to_take_everything_leaves_the_largest(self):
+        """The model cannot be smaller than itself, so one component survives."""
+        positions, indices = self._speckled()
+        mesh = topology.build(positions, indices, drop_below=2.0)
+        assert mesh.face_count == 128
+        assert mesh.dropped_faces == 12
+
+    def test_an_empty_mesh_drops_nothing(self):
+        mesh = topology.build(
+            np.zeros((0, 3), dtype='f4'), np.zeros((0,), dtype=np.uint32), drop_below=0.1
+        )
+        assert mesh.face_count == 0

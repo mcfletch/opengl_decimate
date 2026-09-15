@@ -10,8 +10,9 @@ made of.
 
 :func:`is_legal`
     Topology and classification: may this vertex move at all, is there an edge
-    here, would the result keep the surface a surface, and would it leave two
-    triangles on the same corners.
+    here, would the result keep the surface a surface, would it leave two
+    triangles on the same corners, and is either end a seam the other cannot
+    serve.
 :func:`would_distort`
     Geometry: does the proposed placement turn a neighbouring face over, or
     thin it to a sliver.
@@ -54,7 +55,9 @@ def is_legal(mesh: Topology, kinds: np.ndarray, dying: int, surviving: int) -> b
 
     ``kinds`` is what :meth:`~opengl_decimate.topology.Topology.classify`
     returned. A locked point never dies; a border point dies only along its
-    border, which is what holds a patch's outline in place.
+    border, which is what holds a patch's outline in place; and a point the
+    model draws more than once dies only into a point drawn the same number of
+    times, which is what holds a texture seam on its own line.
     """
     if dying == surviving:
         return False
@@ -64,6 +67,8 @@ def is_legal(mesh: Topology, kinds: np.ndarray, dying: int, surviving: int) -> b
     if not on_edge:
         return False
     if kinds[dying] == VertexClass.BORDER and len(on_edge) != 1:
+        return False
+    if mesh.copies[dying] != mesh.copies[surviving]:
         return False
     if not link_condition(mesh, dying, surviving):
         return False

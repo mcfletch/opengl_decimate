@@ -111,7 +111,13 @@ def _reduce(
 ) -> CollapseSequence:
     """Build the mesh, run a schedule over it, and return what it did."""
     positions = _check(attributes)
-    mesh = topology.build(positions, indices, options.weld_tolerance)
+    mesh = topology.build(
+        positions,
+        indices,
+        options.weld_tolerance,
+        options.drop_components_below,
+        carried=dict(attributes),
+    )
     engine = _Engine(mesh, options, exhaust=exhaust)
     if mesh.face_count:
         if options.schedule == 'heap' and native.ACCELERATED:
@@ -428,6 +434,7 @@ class _Engine:
                 recompute_normals=self.options.recompute_normals,
                 origin=self.mesh.origin,
                 input_faces=self.mesh.input_faces,
+                dropped_faces=self.mesh.dropped_faces,
             )
         count = len(self._dying)
         return CollapseSequence(
@@ -446,6 +453,7 @@ class _Engine:
             recompute_normals=self.options.recompute_normals,
             origin=self.mesh.origin,
             input_faces=self.mesh.input_faces,
+            dropped_faces=self.mesh.dropped_faces,
         )
 
 

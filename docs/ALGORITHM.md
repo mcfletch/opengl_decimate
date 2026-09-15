@@ -24,6 +24,11 @@ Each point is then classified once:
   (faces forming more than one fan around one point), an isolated point, or a
   point the caller named.
 
+Each point is also counted: how many different sets of carried values the model
+draws it with. One almost everywhere; two where a texture seam, a shading crease
+or a material boundary runs, because those are one position the model draws
+twice. Step 4 uses the count.
+
 The classification is computed once and stays true, because the rules in step 4
 admit only contractions that preserve the link of an edge, and those leave every
 border a border and every fan a fan. A bowtie is found by joining corners across
@@ -126,7 +131,7 @@ on [`certify`](#8-measure-what-happened) rather than on this.
 
 ## 4. Refuse what would break the surface
 
-Four questions, all asked every time, because the cases they catch are not rare
+Five questions, all asked every time, because the cases they catch are not rare
 — they are what a dense mesh is made of.
 
 **The link condition.** Contracting is safe exactly when the points joined to
@@ -141,6 +146,15 @@ every local test and encloses nothing.
 proposed placement, before and after. A normal that turns further than
 `max_normal_flip` has been folded over rather than moved, and the surface would
 render inside out there. A face that collapses to a line is refused outright.
+
+**No seam left without a copy to read.** A point the model draws more than once
+may merge only with a point drawn the same number of times. An edge running from
+a texture seam into the middle of a chart has two copies at one end and one at
+the other, and merging it would leave the triangles on the far side of the seam
+reading from this side of it — a band of texture drawn right across them. The
+seam can still shorten along its own length, which is where its triangles go;
+what it cannot do is wander off the line the author drew it on. This is the same
+shape of rule as the border one, for the same reason.
 
 **Shape, optionally.** `min_triangle_quality` refuses a contraction leaving a
 triangle thinner than a scale-free quality measure allows — four root three times
@@ -188,6 +202,17 @@ Each applied contraction appends to a log: the two points, the placement, the
 deviation, and which faces it removed. The log is the reduction expressed once,
 and every target is a prefix of it.
 
+A merged point sits at the placement, which is somewhere on or near the edge,
+and the two ends were measured in different places — so the corners take up the
+copies of whichever end the placement came to rest nearest, and the other end's
+copies are let go. Which end that is has little to do with which *index*
+survived: the placement is chosen from the edge before the legality tests say
+which end may die. Where the winning end carries several copies the corner takes
+the one nearest in attribute space, which is the copy on its own side of the
+seam. These handovers are recorded alongside the contractions, in
+[`opengl_decimate.corners`](../src/opengl_decimate/corners.py), so that they
+replay as a prefix too.
+
 Replaying a prefix of length *k* is four array operations:
 
 - **Which point became which.** `parent` is filled from the prefix in one
@@ -197,7 +222,9 @@ Replaying a prefix of length *k* is four array operations:
   prefix that it survived, gathered with one scatter-maximum.
 - **Which faces are left.** Each face records the step that removed it, so the
   live set is a comparison.
-- **The attributes.** They never moved, so there is nothing to recompute.
+- **Which vertex each corner reads.** The handovers are filled in from the
+  prefix the same way, then pointer-jumped: a corner handed to a copy whose own
+  end is given up later is handed on again.
 
 So a target costs a replay rather than a reduction — a few milliseconds against
 the tens the reduction itself took — and the cost does not grow with how far

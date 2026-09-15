@@ -30,10 +30,18 @@ from enum import IntEnum
 
 import numpy as np
 
+from opengl_decimate.corners import copies_per_point
 from opengl_decimate.spatial import NEIGHBOURHOOD, CellGrid
 from opengl_decimate.types import DecimateError, FloatArray, IndexArray
 
-__all__ = ['VertexClass', 'Topology', 'build', 'weld_positions', 'local_origin']
+__all__ = [
+    'VertexClass',
+    'Topology',
+    'build',
+    'components',
+    'weld_positions',
+    'local_origin',
+]
 
 
 class VertexClass(IntEnum):
@@ -231,6 +239,8 @@ class Topology:
         vertex_point: IndexArray,
         origin: FloatArray | None = None,
         input_faces: int | None = None,
+        dropped_faces: int = 0,
+        copies: IndexArray | None = None,
     ) -> None:
         self.positions = np.ascontiguousarray(positions, dtype='d')
         #: What ``positions`` are measured from; zero for a model near it.
@@ -239,10 +249,22 @@ class Topology:
         self.corners = np.ascontiguousarray(corners, dtype=np.int64)
         #: Which welded point each *input* vertex went to.
         self.vertex_point = np.ascontiguousarray(vertex_point, dtype=np.int64)
+        #: How many different sets of carried values are drawn at each point --
+        #: see :func:`~opengl_decimate.corners.copies_per_point`. One
+        #: everywhere for a mesh of positions alone, which is what a caller
+        #: naming no attributes gets.
+        self.copies = (
+            np.ones(len(self.positions), dtype=np.int32)
+            if copies is None
+            else np.ascontiguousarray(copies, dtype=np.int32)
+        )
         #: Triangles the caller handed in, before welding dropped any. A ratio
         #: is a share of these, which is what a caller counted; ``face_count``
         #: is what is left to work on.
         self.input_faces = len(self.faces) if input_faces is None else int(input_faces)
+        #: Input triangles removed for belonging to a component too small to be
+        #: worth the triangles -- see ``drop_below`` on :func:`build`.
+        self.dropped_faces = int(dropped_faces)
         #: False once a collapse has removed the face.
         self.alive = np.ones(len(self.faces), dtype=bool)
         # Kept as a running total rather than counted on demand: a reduction
@@ -484,7 +506,69 @@ def _multi_fan_points(faces: IndexArray) -> IndexArray:
     return np.flatnonzero(np.bincount(fans // faces.size) > 1)
 
 
-def build(positions: FloatArray, indices: IndexArray, tolerance: float = 0.0) -> Topology:
+def components(faces: IndexArray, count: int) -> IndexArray:
+    """Which connected surface each point belongs to, as a label per point.
+
+    Two points are in the same component where a chain of triangles joins them.
+    A point no triangle uses keeps a label of its own, which costs nothing and
+    means the answer needs no separate account of what is used.
+
+    This is what a reduction's floor is usually about. Every component reduces
+    independently and each has a floor of its own -- a closed shell cannot go
+    below four triangles -- so a scan that arrived with the subject and two
+    hundred crumbs spends four triangles on each crumb however coarse a target
+    it is given. :func:`build` takes ``drop_below`` for that reason.
+
+    >>> import numpy as np
+    >>> faces = np.array([[0, 1, 2], [3, 4, 5]])
+    >>> components(faces, 6).tolist()
+    [0, 0, 0, 3, 3, 3]
+    """
+    if not len(faces):
+        return np.arange(count, dtype=np.int64)
+    faces = np.asarray(faces).reshape(-1, 3)
+    # All three edges of every face at once. Hooking on one edge at a time would
+    # join only the pairs that edge happens to touch.
+    here = np.concatenate([faces[:, 0], faces[:, 1], faces[:, 2]])
+    there = np.concatenate([faces[:, 1], faces[:, 2], faces[:, 0]])
+    return _connected(here, there, count)
+
+
+def _too_small(points: FloatArray, faces: IndexArray, share: float) -> np.ndarray:
+    """Which faces belong to a component smaller than ``share`` of the model.
+
+    Size is the component's own bounding-box diagonal against the whole model's,
+    so the answer means the same thing whatever units the model is in. It is
+    also the measure that maps onto the screen: a component at one per cent of
+    the model's diagonal covers about one pixel where the model covers a hundred.
+
+    The largest component is never among them. A share above one would otherwise
+    take the whole model, and a caller who asked for too much wants the subject
+    back rather than an empty mesh.
+    """
+    label = components(faces, len(points))
+    low = np.full((len(points), 3), np.inf)
+    high = np.full((len(points), 3), -np.inf)
+    np.minimum.at(low, label, points)
+    np.maximum.at(high, label, points)
+    with np.errstate(invalid='ignore'):
+        reach = np.linalg.norm(high - low, axis=1)
+    reach[~np.isfinite(reach)] = 0.0
+    whole = float(np.linalg.norm(np.max(points, axis=0) - np.min(points, axis=0)))
+    if not whole > 0.0:
+        return np.zeros(len(faces), dtype=bool)
+    per_face = label[faces[:, 0]]
+    biggest = int(np.argmax(reach))
+    return (reach[per_face] < share * whole) & (per_face != biggest)
+
+
+def build(
+    positions: FloatArray,
+    indices: IndexArray,
+    tolerance: float = 0.0,
+    drop_below: float = 0.0,
+    carried: dict[str, np.ndarray] | None = None,
+) -> Topology:
     """A :class:`Topology` from the arrays a caller holds.
 
     Vertices sharing a position are welded, and a triangle left with a repeated
@@ -494,6 +578,19 @@ def build(positions: FloatArray, indices: IndexArray, tolerance: float = 0.0) ->
     The welded points are held relative to :func:`local_origin`, so a model far
     from the origin is measured where ``float64`` still has the digits to
     measure it in.
+
+    ``drop_below`` removes whole connected components smaller than that share of
+    the model's bounding-box diagonal, before any reduction sees them. A scan
+    arrives with the subject and whatever else was in the room, and every crumb
+    is a closed shell with a floor of four triangles -- so a target of a few
+    hundred triangles is spent on crumbs unless they go. ``0.01`` is about one
+    pixel where the whole model covers a hundred. The largest component is never
+    dropped, whatever share is asked for.
+
+    ``carried`` is what the mesh's vertices hold besides their positions. It is
+    read only to count how many different sets of values each point is drawn
+    with, which is where the surface's seams are; without it every point counts
+    as drawn once and a reduction is free to collapse across them.
     """
     positions = np.asarray(positions)
     if positions.ndim != 2 or positions.shape[1] != 3:
@@ -523,11 +620,24 @@ def build(positions: FloatArray, indices: IndexArray, tolerance: float = 0.0) ->
     usable = (
         (faces[:, 0] != faces[:, 1]) & (faces[:, 1] != faces[:, 2]) & (faces[:, 0] != faces[:, 2])
     )
+    faces, corners = faces[usable], corners[usable]
+    dropped = 0
+    if drop_below > 0.0 and len(faces):
+        small = _too_small(points, faces, drop_below)
+        if np.any(small):
+            dropped = int(np.count_nonzero(small))
+            faces, corners = faces[~small], corners[~small]
     return Topology(
         points - origin,
-        faces[usable],
-        corners[usable],
+        faces,
+        corners,
         vertex_point,
         origin,
-        input_faces=len(corners),
+        input_faces=len(flat) // 3,
+        dropped_faces=dropped,
+        copies=(
+            None
+            if carried is None
+            else copies_per_point(vertex_point, corners, carried, len(points))
+        ),
     )

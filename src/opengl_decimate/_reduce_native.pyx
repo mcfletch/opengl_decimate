@@ -276,6 +276,7 @@ cdef class Reducer:
     cdef double[:, ::1] quadrics
     cdef double[::1] weights
     cdef signed char[::1] kinds
+    cdef int[::1] copies
 
     # Faces on a point: `head[v]` is an incidence, `nxt`/`prv` chain them. An
     # incidence is `face * 3 + slot`, so the point it belongs to is always
@@ -355,6 +356,7 @@ cdef class Reducer:
         double[:, ::1] quadrics,
         double[::1] weights,
         signed char[::1] kinds,
+        int[::1] copies,
         int placement_mode,
         double max_flip_cos,
         double min_quality,
@@ -367,6 +369,7 @@ cdef class Reducer:
         self.quadrics = quadrics
         self.weights = weights
         self.kinds = kinds
+        self.copies = copies
         self.placement_mode = placement_mode
         self.max_flip_cos = max_flip_cos
         self.min_quality = min_quality
@@ -788,6 +791,12 @@ cdef class Reducer:
             if self.error_limit >= 0.0 and fresh > self.error_limit:
                 break
 
+            # A point the model draws more than once -- a texture seam, a
+            # shading crease -- may only merge with a point drawn the same
+            # number of times, so each copy still has one to hand its corners
+            # to and the seam shortens along its own line.
+            if self.copies[a] != self.copies[b]:
+                continue
             can_a = self.kinds[a] != 2 and (
                 self.kinds[a] != 1 or edge_faces == 1)
             can_b = self.kinds[b] != 2 and (

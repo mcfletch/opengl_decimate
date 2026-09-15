@@ -27,16 +27,16 @@ NumPy is the only dependency.
 
 ## What it does to a scan
 
-`coastal_cliff_04`, 1,537,926 triangles of photogrammetry, decimated **once** in 9.3 s -- every level below is a prefix of that one recording replayed.
+`coastal_cliff_04`, 1,537,926 triangles of photogrammetry, decimated **once** in 9.5 s -- every level below is a prefix of that one recording replayed.
 
-<table><tr><td align="center"><img src="https://raw.githubusercontent.com/mcfletch/opengl_decimate/main/docs/gallery/cliff-l0-shaded.png" width="190" alt="Coastal cliff at 1,537,926 triangles"><br><sub><b>1,537,926</b> tri</sub></td><td align="center"><img src="https://raw.githubusercontent.com/mcfletch/opengl_decimate/main/docs/gallery/cliff-l2-shaded.png" width="190" alt="Coastal cliff at 9,999 triangles"><br><sub><b>9,999</b> tri</sub></td><td align="center"><img src="https://raw.githubusercontent.com/mcfletch/opengl_decimate/main/docs/gallery/cliff-l4-shaded.png" width="190" alt="Coastal cliff at 2,289 triangles"><br><sub><b>2,289</b> tri</sub></td><td align="center"><img src="https://raw.githubusercontent.com/mcfletch/opengl_decimate/main/docs/gallery/cliff-l6-shaded.png" width="190" alt="Coastal cliff at 523 triangles"><br><sub><b>523</b> tri</sub></td></tr></table>
+<table><tr><td align="center"><img src="https://raw.githubusercontent.com/mcfletch/opengl_decimate/main/docs/gallery/cliff-l0-shaded.png" width="190" alt="Coastal cliff at 1,537,926 triangles"><br><sub><b>1,537,926</b> tri</sub></td><td align="center"><img src="https://raw.githubusercontent.com/mcfletch/opengl_decimate/main/docs/gallery/cliff-l1-shaded.png" width="190" alt="Coastal cliff at 32,000 triangles"><br><sub><b>32,000</b> tri</sub></td><td align="center"><img src="https://raw.githubusercontent.com/mcfletch/opengl_decimate/main/docs/gallery/cliff-l2-shaded.png" width="190" alt="Coastal cliff at 8,000 triangles"><br><sub><b>8,000</b> tri</sub></td><td align="center"><img src="https://raw.githubusercontent.com/mcfletch/opengl_decimate/main/docs/gallery/cliff-l3-shaded.png" width="190" alt="Coastal cliff at 4,000 triangles"><br><sub><b>4,000</b> tri</sub></td></tr></table>
 
-| Subject | Source | Reduced in | Draw at source | Draw at 10,000 |
+| Subject | Source | Reduced in | Draw at source | Draw at 32,000 |
 |---|---:|---:|---:|---:|
-| Coastal cliff | 1,537,926 tri | 9.3 s | 0.19 ms | 0.04 ms |
-| Lekking ruffs | 547,647 tri | 3.7 s | 0.24 ms | 0.04 ms |
-| Coastal land rocks | 1,291,146 tri | 8.0 s | 0.17 ms | 0.04 ms |
-| Island tree | 2,085,320 tri | 11.3 s | 0.33 ms | 0.04 ms |
+| Coastal cliff | 1,537,926 tri | 9.5 s | 0.20 ms | 0.04 ms |
+| Lekking ruffs | 547,647 tri | 4.2 s | 0.21 ms | 0.06 ms |
+| Coastal land rocks | 1,291,146 tri | 8.1 s | 0.17 ms | 0.04 ms |
+| Island tree | 2,085,320 tri | 9.8 s | 0.34 ms | 0.04 ms |
 | Marble bust | 17,456 tri | 0.0 s | 0.04 ms | 0.04 ms |
 
 [**docs/GALLERY.md**](docs/GALLERY.md) has every level of every subject, each drawn from touching distance out to barely visible, with what it cost to make and what it costs to draw.
@@ -61,11 +61,16 @@ classified once as manifold, border or locked, and a border point moves only
 along its border, so the outline of an open patch stays where it was.
 
 **Attributes are carried, never invented.** Every value in the output is a value
-that was in the input, taken from the corner it belonged to. Two corners at the
-same point with different normals or texture coordinates stay two vertices, so a
-UV seam is still a seam and a hard edge is still hard. `recompute_normals`
-replaces `NORMAL` with the normals of the surface that is left, where carrying
-the input's is not what you want.
+that was in the input, measured at the place the surface now is: a contraction
+hands the corners it merges to the end of the edge the merged point came to rest
+nearest, so a texture coordinate and a normal travel with the position they
+describe. Two corners at the same point with different normals or texture
+coordinates stay two vertices, so a UV seam is still a seam and a hard edge is
+still hard — and a point drawn more than once merges only with another drawn the
+same number of times, which keeps a seam on its own line instead of letting it
+wander into the middle of a chart. `recompute_normals` replaces `NORMAL` with
+the normals of the surface that is left, where carrying the input's is not what
+you want.
 
 **A recorded reduction, replayed to any target.** `collapse_sequence` runs the
 whole reduction once and records it; `at()` then reaches any triangle count by

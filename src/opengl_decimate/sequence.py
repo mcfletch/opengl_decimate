@@ -11,7 +11,8 @@ four array operations rather than a re-run.
   prefix that it survived, gathered with one scatter.
 - Which faces are left: each face records the step that removed it, so the live
   set is a comparison.
-- The corners' attributes never move at all, so nothing has to be recomputed.
+- Which vertex each corner now reads its attributes from: the corner moves
+  recorded alongside the contractions, pointer-jumped the same way.
 
 So a target costs a *replay*, not a reduction: a few milliseconds against the
 tens the reduction itself took, and the same few whether the sequence being
@@ -28,6 +29,7 @@ from typing import Any
 
 import numpy as np
 
+from opengl_decimate.corners import corner_moves, follow
 from opengl_decimate.types import POSITION, FloatArray, IndexArray
 
 __all__ = ['SimplifyResult', 'CollapseSequence']
@@ -57,6 +59,9 @@ class SimplifyResult:
     #: Zero on a clean export; on scanned or badly-exported data it is the gap
     #: between what the caller counted and what there was to reduce.
     welded_away: int = 0
+    #: Input triangles ``drop_components_below`` removed, for belonging to a
+    #: piece of the model too small to be worth spending triangles on.
+    dropped_away: int = 0
 
     @property
     def triangle_count(self) -> int:
@@ -70,7 +75,11 @@ class CollapseSequence:
 
     Held against the *welded* mesh: ``points`` are the distinct positions of the
     input, ``faces`` index them, and ``corners`` records which input vertex each
-    corner came from so its attributes can be handed back.
+    corner came from so its attributes can be handed back. A contraction hands
+    the dying point's corners to the surviving point, and those handovers are
+    recorded too -- see :mod:`opengl_decimate.corners` -- so a corner's
+    attributes belong to the position it is drawn at however far the reduction
+    has gone.
 
     ``points`` and ``placement`` are measured from ``origin``, which
     :func:`~opengl_decimate.topology.local_origin` sets to the model's own
@@ -94,7 +103,12 @@ class CollapseSequence:
     #: Triangles the caller handed in, before welding dropped any. A ratio is a
     #: share of these; ``faces`` is what welding left to reduce.
     input_faces: int | None = None
+    #: Triangles removed for belonging to a component too small to be worth them.
+    dropped_faces: int = 0
     _removed_by_step: Any = field(default=None, repr=False)
+    _moved: Any = field(default=None, repr=False)
+    _moved_to: Any = field(default=None, repr=False)
+    _moved_by_step: Any = field(default=None, repr=False)
 
     def __len__(self) -> int:
         """How many contractions were recorded."""
@@ -106,6 +120,15 @@ class CollapseSequence:
         removals = self.removed_at[self.removed_at >= 0]
         per_step = np.bincount(removals, minlength=len(self.dying) + 1)
         self._removed_by_step = np.concatenate([[0], np.cumsum(per_step)])
+        self._moved, self._moved_to, self._moved_by_step = corner_moves(
+            self.points,
+            self.vertex_point,
+            self.corners,
+            self.attributes,
+            self.dying,
+            self.surviving,
+            self.placement,
+        )
 
     def triangles_after(self, steps: int) -> int:
         """How many triangles are left once ``steps`` contractions are applied."""
@@ -148,6 +171,10 @@ class CollapseSequence:
         the correspondence the caller needs to follow a vertex forward.
         Positions come back in the caller's own coordinates, with ``origin``
         added back on.
+
+        The corners come back remapped the same way the faces do, so a corner
+        names the vertex whose attributes belong at the position the corner is
+        now drawn at rather than the vertex it started as.
         """
         steps = int(np.clip(steps, 0, len(self)))
         roots = np.arange(len(self.points), dtype=np.int64)
@@ -166,7 +193,15 @@ class CollapseSequence:
             positions[moved] = self.placement[last[moved]]
 
         alive = (self.removed_at < 0) | (self.removed_at >= steps)
-        return positions + self.origin, roots, roots[self.faces[alive]], self.corners[alive]
+        handed = follow(
+            self._moved, self._moved_to, len(self.vertex_point), int(self._moved_by_step[steps])
+        )
+        return (
+            positions + self.origin,
+            roots,
+            roots[self.faces[alive]],
+            handed[self.corners[alive]],
+        )
 
     def at(
         self,
@@ -189,7 +224,10 @@ class CollapseSequence:
             collapses=steps,
             recompute_normals=self.recompute_normals,
             input_triangles=self.input_faces or len(self.faces),
-            welded_away=(self.input_faces or len(self.faces)) - len(self.faces),
+            welded_away=(
+                (self.input_faces or len(self.faces)) - len(self.faces) - self.dropped_faces
+            ),
+            dropped_away=self.dropped_faces,
         )
 
 
@@ -230,6 +268,7 @@ def _emit(
     recompute_normals: bool,
     input_triangles: int,
     welded_away: int,
+    dropped_away: int,
 ) -> SimplifyResult:
     """Turn the live surface back into vertex arrays and an index array.
 
@@ -252,6 +291,7 @@ def _emit(
             collapses=collapses,
             input_triangles=input_triangles,
             welded_away=welded_away,
+            dropped_away=dropped_away,
         )
 
     columns = [flat_points.astype('d')[:, None]]
@@ -297,6 +337,7 @@ def _emit(
         collapses=collapses,
         input_triangles=input_triangles,
         welded_away=welded_away,
+        dropped_away=dropped_away,
     )
 
 
