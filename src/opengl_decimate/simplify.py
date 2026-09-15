@@ -116,7 +116,7 @@ def _reduce(
         indices,
         options.weld_tolerance,
         options.drop_components_below,
-        carried=dict(attributes) if options.preserve_seams else None,
+        carried=dict(attributes) if options.lock_seams else None,
     )
     engine = _Engine(mesh, options, exhaust=exhaust)
     if mesh.face_count:

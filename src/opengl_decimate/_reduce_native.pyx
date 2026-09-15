@@ -791,10 +791,12 @@ cdef class Reducer:
             if self.error_limit >= 0.0 and fresh > self.error_limit:
                 break
 
-            # A point the model draws more than once -- a texture seam, a
-            # shading crease -- may only merge with a point drawn the same
-            # number of times, so each copy still has one to hand its corners
-            # to and the seam shortens along its own line.
+            # A point drawn at several texture coordinates sits on a seam, and
+            # merges only with a point drawn at the same number. Merging it
+            # with a point inside a chart moves the seam off its own line --
+            # whichever end dies, since it is the merged point's position that
+            # changes -- and the coordinate it carries was measured where the
+            # seam used to be.
             if self.copies[a] != self.copies[b]:
                 continue
             can_a = self.kinds[a] != 2 and (

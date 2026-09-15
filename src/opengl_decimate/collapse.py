@@ -55,9 +55,9 @@ def is_legal(mesh: Topology, kinds: np.ndarray, dying: int, surviving: int) -> b
 
     ``kinds`` is what :meth:`~opengl_decimate.topology.Topology.classify`
     returned. A locked point never dies; a border point dies only along its
-    border, which is what holds a patch's outline in place; and a point the
-    model draws more than once dies only into a point drawn the same number of
-    times, which is what holds a texture seam on its own line.
+    border, which is what holds a patch's outline in place; and a point drawn at
+    several texture coordinates merges only with a point drawn at the same
+    number, which holds a texture seam on its own line.
     """
     if dying == surviving:
         return False
@@ -186,6 +186,9 @@ def contract(mesh: Topology, dying: int, surviving: int, placement: FloatArray) 
     is handed to ``surviving``. Nothing is reallocated -- a removed face is
     marked dead in place -- so face indices mean the same thing for the whole
     reduction and a collapse sequence can be replayed against them.
+
+    The merged point is drawn at the same number of texture coordinates either
+    end was: :func:`is_legal` admits no contraction where those differ.
     """
     removed = sorted(mesh.edge_faces(dying, surviving))
     for face in removed:

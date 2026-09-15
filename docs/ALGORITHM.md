@@ -153,21 +153,15 @@ proposed placement, before and after. A normal that turns further than
 `max_normal_flip` has been folded over rather than moved, and the surface would
 render inside out there. A face that collapses to a line is refused outright.
 
-**No seam left without a coordinate to read**, with `preserve_seams` on, which
-is the default. A point drawn at more than one texture coordinate may merge only
-with a point drawn at the same number. An edge running from a seam into the
-middle of a chart has two coordinates at one end and one at the other, and
-merging it would leave the triangles on the far side of the seam reading from
-this side of it. The seam can still shorten along its own length, which is where
-its triangles go; what it cannot do is wander off the line the author drew it
-on. This is the same shape of rule as the border one, for the same reason.
-
-It is also what decides how far a textured model goes. Where the atlas is a few
-large charts the rule costs nothing. Where it is thousands of small ones the
-seam network is most of what a reduction has left, and the chain stops there —
-which is the honest answer for that asset, since the alternative is a level
-whose texture no longer describes it. `preserve_seams=False` is for a target
-coarse enough that the texture has stopped carrying the model.
+**The seam, where `lock_seams` asks for it.** A point drawn at more than one
+texture coordinate may then merge only with a point drawn at the same number,
+which is the same shape of rule as the border one and holds the seam network
+exactly where the author drew it. It is off by default, because step 6 already
+keeps each side of a seam reading from its own chart and holding the *line* as
+well costs the triangles the seam network needs — on a coastal cliff scan, the
+difference between reaching five hundred triangles and stopping at two thousand.
+What it buys is a seam that does not slide, which is worth its triangles where
+the atlas is thousands of small charts and the sliding is most of the surface.
 
 **Shape, optionally.** `min_triangle_quality` refuses a contraction leaving a
 triangle thinner than a scale-free quality measure allows — four root three times
@@ -220,9 +214,18 @@ and the two ends were measured in different places — so the corners take up th
 copies of whichever end the placement came to rest nearest, and the other end's
 copies are let go. Which end that is has little to do with which *index*
 survived: the placement is chosen from the edge before the legality tests say
-which end may die. Where the winning end carries several copies the corner takes
-the one nearest in attribute space, which is the copy on its own side of the
-seam. These handovers are recorded alongside the contractions, in
+which end may die.
+
+Two rules sit over that, and between them are why a seam survives a reduction
+without being locked. The end drawn at **more** texture coordinates wins
+outright, whatever the distance says, because it is the only one with a
+coordinate to give each side of the seam it is on. And where the winning end
+carries several copies, the corner takes the one nearest in attribute space,
+which is the copy on its own side of the seam. So a triangle is never left
+reading the chart next door; what it can do is read a coordinate measured a
+little along from where it now is, which is what `lock_seams` refuses.
+
+These handovers are recorded alongside the contractions, in
 [`opengl_decimate.corners`](../src/opengl_decimate/corners.py), so that they
 replay as a prefix too.
 

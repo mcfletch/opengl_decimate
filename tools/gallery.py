@@ -109,6 +109,10 @@ class Subject:
     note: str = ''
     #: Components below this share of the model's diagonal go before reducing.
     drop_components_below: float = 0.0
+    #: Hold the texture atlas exactly, for a subject whose atlas is fragmented
+    #: enough that the alternative is a level whose texture has stopped
+    #: describing it. Costs the triangles the seam network needs.
+    lock_seams: bool = False
 
 
 SUBJECTS = (
@@ -145,10 +149,17 @@ SUBJECTS = (
             'surface only because the primitives are merged and welded first. Nine '
             'of its thirteen components are specks the photogrammetry left behind, '
             'and `drop_components_below` takes them: 572 triangles, which is fifteen '
-            'per cent of what the coarsest rung has to spend. It is the atlas that '
-            'stops this chain, not the specks -- see **Where a chain stops** below.'
+            'per cent of what the coarsest rung has to spend.\n\n'
+            'This is the subject whose atlas decides the answer, so it is the one '
+            'reduced with `lock_seams`. A third of its edges are on a chart '
+            'boundary, and the chain stops where the seam network is all that is '
+            'left. Without the lock it reaches two thousand triangles, and by eight '
+            'thousand each triangle is already sampling two and a half times the '
+            'texture it should -- the levels are there, but the bird is not on them. '
+            'See **Where a chain stops** below.'
         ),
         drop_components_below=0.01,
+        lock_seams=True,
     ),
     Subject(
         slug='rocks',
@@ -276,9 +287,10 @@ def shape_of(groups: list) -> tuple[int, int, float]:
     foliage arrives with hundreds.
 
     The third is the texture atlas. An edge whose ends are drawn at different
-    numbers of texture coordinates runs off a seam into a chart, and
-    ``preserve_seams`` refuses it; where the atlas is thousands of small charts,
-    most of the model's edges are that edge.
+    numbers of texture coordinates runs off a seam into a chart; a reduction
+    crosses it without tearing the texture, but the coordinate the seam carries
+    slides as the merged point moves, and ``lock_seams`` is what refuses it at
+    the price of the triangles the seam network needs.
     """
     from opengl_decimate import corners, topology
 
@@ -410,7 +422,11 @@ def reduce_subject(subject: Subject, certify: bool) -> Reduction:
     grouped, primitives = load(path)
     load_s = time.perf_counter() - start
 
-    options = SimplifyOptions(target_ratio=1.0, drop_components_below=subject.drop_components_below)
+    options = SimplifyOptions(
+        target_ratio=1.0,
+        drop_components_below=subject.drop_components_below,
+        lock_seams=subject.lock_seams,
+    )
     source_triangles = sum(len(indices) // 3 for _m, _a, indices in grouped)
     welded = sum(
         topology.build(
@@ -981,6 +997,9 @@ def closing(reductions: list) -> list:
         ' reduction stops where no contraction is left that keeps the surface a'
         ' surface, and two properties of the *model* decide where that is.',
         '',
+        ' `opengl_decimate.survey` measures all three off any mesh, before a'
+        ' reduction is spent on it.',
+        '',
         '**Pieces.** Every connected piece reduces on its own and each has a'
         ' floor of its own -- a closed shell cannot go below four triangles --'
         ' so a scan that arrived with the subject and two hundred crumbs spends'
@@ -996,14 +1015,13 @@ def closing(reductions: list) -> list:
         ' option in this package will remove one: closing a tunnel is a'
         ' different operation from contracting an edge.',
         '',
-        '**Seams.** `preserve_seams` holds the boundaries of the texture atlas,'
-        ' so a seam shortens along its own line rather than wandering into the'
-        ' middle of a chart and drawing a band of the image across it. Where the'
-        ' atlas is a few large charts this costs nothing. Where it is thousands'
-        ' of small ones the seam network is most of what a reduction has left,'
-        ' and the chain stops on it -- which is the honest answer for that'
-        ' asset, because the levels below it would not be the model any more.'
-        ' The share of edges a seam holds is the number to look at.',
+        '**Seams.** A reduction crosses the boundary of a texture chart without'
+        ' tearing it -- each side keeps reading from its own chart -- but the'
+        ' coordinate a seam carries slides as the merged point moves, so a model'
+        ' that is mostly seam is a model whose texture drifts as it coarsens.'
+        ' `lock_seams` refuses those contractions, at the price of the triangles'
+        ' the seam network needs. The share of edges on a seam is what says'
+        ' whether that price is worth paying.',
         '',
     ]
     out += [

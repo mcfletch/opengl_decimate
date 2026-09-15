@@ -36,7 +36,7 @@ find the atlas seams, and nothing else.
 | `open_pieces` | `int` | how many of those have a border |
 | `largest_piece` | `int` | triangles in the largest, which is the subject where the rest are specks |
 | `handles` | `int` | tunnels through the surface, from Euler's formula |
-| `seam_share` | `float` | share of edges whose ends are drawn at different numbers of texture coordinates — what `preserve_seams` refuses |
+| `seam_share` | `float` | share of edges whose ends are drawn at different numbers of texture coordinates — what `lock_seams` refuses |
 | `floor` | `int` | the fewest triangles any reduction can reach: one per open piece, four per closed one. A lower bound from the pieces alone; handles and seams push the real floor above it |
 | `reducible` | `float` | the share of the triangles a reduction could in principle remove. One for a model nothing stops, near zero for a canopy of leaf cards |
 
@@ -83,7 +83,7 @@ zero.
 | `max_normal_flip` | `float` | `90.0` | degrees a face's normal may turn before the contraction is refused |
 | `min_triangle_quality` | `float` | `0.0` | shape floor: 0 admits any shape, 1 only equilateral |
 | `placement` | `str` | `'optimal'` | `'optimal'` minimises the summed quadric; `'endpoint'` keeps whichever end of the edge costs less, so every output point is an input point |
-| `preserve_seams` | `bool` | `True` | hold the boundaries of the texture atlas: a point drawn at several texture coordinates merges only with a point drawn at the same number, so a seam shortens along its own line instead of wandering into a chart. Where the atlas is a few large charts this costs nothing; where it is thousands of small ones the seam network is most of what is left and the reduction stops there rather than tearing the texture. Turn it off only where the target is coarse enough that the texture no longer carries the model |
+| `lock_seams` | `bool` | `False` | hold the boundaries of the texture atlas exactly, as `lock_boundary` holds the outline: a point drawn at several texture coordinates then merges only with a point drawn at the same number. Off, each side of a seam still reads from its own chart — a corner takes the copy nearest in attribute space, and the end drawn at more coordinates keeps them — but the seam's *line* is not held, so the coordinate it carries slides as the merged point moves. Worth its triangles where the atlas is thousands of small charts and that sliding is most of the surface |
 
 ### How it runs
 

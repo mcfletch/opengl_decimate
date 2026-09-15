@@ -85,6 +85,7 @@ def corner_moves(
         np.asarray(placement, dtype='d'),
         dying,
         surviving,
+        copies_per_point(vertex_point, corners, attributes, point_count),
         point_count,
     )
 
@@ -192,6 +193,7 @@ def _ends_given_up(
     placement: FloatArray,
     dying: IndexArray,
     surviving: IndexArray,
+    charts: IndexArray,
     point_count: int,
 ) -> tuple[IndexArray, IndexArray]:
     """For each contraction, which end's copies are let go and which are kept.
@@ -201,12 +203,19 @@ def _ends_given_up(
     against the place those copies were *measured*, not against where the point
     that owns them has since been moved to.
 
+    The end drawn at **more** texture coordinates wins outright, because it is
+    the only one with a coordinate to give each side of the seam it is on.
+    Letting distance decide there would hand a whole chart's triangles the
+    coordinate of the chart next door. Distance decides between ends drawn at
+    the same number, which is every edge that is not on a seam.
+
     The loop is the reduction's own order: a contraction's answer depends on what
     the contractions before it decided, which is the same reason the reduction
     itself is sequential. It costs a few array lookups per contraction, against
     the neighbourhood the reduction re-priced to produce one.
     """
     sourced = list(range(point_count))
+    drawn = charts.tolist()
     coordinate = points.reshape(-1).tolist()
     target = placement.reshape(-1).tolist()
     steps = len(dying)
@@ -214,21 +223,25 @@ def _ends_given_up(
     winner = [0] * steps
     for step, (dies, lives) in enumerate(zip(dying.tolist(), surviving.tolist(), strict=True)):
         from_dying, from_surviving = sourced[dies], sourced[lives]
-        at = step * 3
-        x, y, z = target[at], target[at + 1], target[at + 2]
-        near, far = from_dying * 3, from_surviving * 3
-        # A tie is the midpoint of an edge whose ends were measured equally far
-        # away, where either answer is as good; keeping the surviving end's
-        # copies is the one that moves fewer corners.
-        nearer = (
-            (x - coordinate[near]) ** 2
-            + (y - coordinate[near + 1]) ** 2
-            + (z - coordinate[near + 2]) ** 2
-        ) < (
-            (x - coordinate[far]) ** 2
-            + (y - coordinate[far + 1]) ** 2
-            + (z - coordinate[far + 2]) ** 2
-        )
+        richer = drawn[from_dying] - drawn[from_surviving]
+        if richer:
+            nearer = richer > 0
+        else:
+            at = step * 3
+            x, y, z = target[at], target[at + 1], target[at + 2]
+            near, far = from_dying * 3, from_surviving * 3
+            # A tie is the midpoint of an edge whose ends were measured equally
+            # far away, where either answer is as good; keeping the surviving
+            # end's copies is the one that moves fewer corners.
+            nearer = (
+                (x - coordinate[near]) ** 2
+                + (y - coordinate[near + 1]) ** 2
+                + (z - coordinate[near + 2]) ** 2
+            ) < (
+                (x - coordinate[far]) ** 2
+                + (y - coordinate[far + 1]) ** 2
+                + (z - coordinate[far + 2]) ** 2
+            )
         keep, give_up = (from_dying, from_surviving) if nearer else (from_surviving, from_dying)
         sourced[lives] = keep
         winner[step] = keep

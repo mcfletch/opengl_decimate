@@ -29,6 +29,11 @@ def _dome_normal(positions):
     return (normal / np.linalg.norm(normal, axis=1)[:, None]).astype('f4')
 
 
+def _mesh_of(result):
+    """A result as the ``(attributes, indices)`` pair the checks above take."""
+    return result.attributes, result.indices
+
+
 def _texel_density(attributes, indices):
     """sqrt(uv area / world area), per triangle.
 
@@ -137,12 +142,22 @@ class TestAnAttributeStaysOnItsPoint:
 class TestASeamStaysASeam:
     """A point drawn twice, once per chart, keeps both charts apart.
 
-    The patch below is textured in two halves: the vertices along the middle
-    column are doubled, the left copy finishing the left chart at ``u = 1`` and
-    the right copy starting the right chart at ``u = 0``. Welding merges the
-    two copies into one *point* -- they are at the same position -- and they
-    stay two *corners*, which is what a seam is.
+    The patch below is textured in two halves laid side by side in the atlas
+    with a gap between them: the left chart runs ``u`` from 0 to 1, the right
+    from 2 to 3, and nothing is painted in between. The vertices along the seam
+    are doubled, one copy finishing the left chart and one starting the right.
+    Welding merges the two copies into one *point* -- they are at the same
+    position -- and they stay two *corners*, which is what a seam is.
+
+    That gap is what makes the two failures tell themselves apart. A triangle
+    reading a corner from each chart samples right across it, which is a tear
+    and is what must never happen. A triangle whose corners are all in one chart
+    but whose seam coordinate has slid along with the point carrying it is a
+    seam that has left its line, which is what ``lock_seams`` is for.
     """
+
+    #: Where the right chart starts, with the left one ending at 1.
+    APART = 2.0
 
     @staticmethod
     def _two_charts(side=17):
@@ -160,12 +175,11 @@ class TestASeamStaysASeam:
         positions = np.concatenate([positions, positions[right]])
 
         uv = np.zeros((len(positions), 2), dtype='f4')
-        along = (positions[:, 2] + 1.0) * 0.5
-        left_u = np.clip((positions[:, 0] + 1.0) / 1.0, 0.0, 1.0)
-        right_u = np.clip(positions[:, 0], 0.0, 1.0)
-        uv[:, 1] = along
-        uv[: len(column), 0] = left_u[: len(column)]
-        uv[len(column) :, 0] = right_u[len(column) :]
+        uv[:, 1] = (positions[:, 2] + 1.0) * 0.5
+        uv[: len(column), 0] = np.clip(positions[: len(column), 0] + 1.0, 0.0, 1.0)
+        uv[len(column) :, 0] = (
+            np.clip(positions[len(column) :, 0], 0.0, 1.0) + TestASeamStaysASeam.APART
+        )
 
         on_right = column[faces].min(axis=1) >= middle
         faces[on_right] = copy_of[faces[on_right]]
@@ -174,15 +188,21 @@ class TestASeamStaysASeam:
             faces.reshape(-1).astype(np.uint32),
         )
 
+    @classmethod
+    def _torn(cls, attributes, indices):
+        """Triangles reading a corner from each chart, so sampling the gap."""
+        faces = np.asarray(indices).reshape(-1, 3)
+        along = np.asarray(attributes['TEXCOORD_0'], dtype='d')[faces][:, :, 0]
+        middle = 0.5 * (1.0 + cls.APART)
+        return np.any(along < middle, axis=1) & np.any(along > middle, axis=1)
+
     @staticmethod
-    def _crossings(attributes, indices):
+    def _adrift(attributes, indices):
         """Triangles whose ``u`` outruns the distance they cover.
 
         Both charts run ``u`` with the surface at the same rate, so inside
-        either of them a triangle's ``u`` range is its ``x`` range. Only a
-        triangle reading one corner from each chart can do more than that, and
-        what it does is sample a band right across the texture -- the visible
-        tear a seam exists to prevent.
+        either of them a triangle's ``u`` range is its ``x`` range. More than
+        that is a coordinate measured somewhere the triangle no longer is.
         """
         faces = np.asarray(indices).reshape(-1, 3)
         across = np.asarray(attributes['POSITION'], dtype='d')[faces][:, :, 0]
@@ -190,21 +210,48 @@ class TestASeamStaysASeam:
         return np.ptp(along, axis=1) > np.ptp(across, axis=1) + 1e-6
 
     def test_the_source_mesh_has_a_seam_to_keep(self):
-        """The fixture is what it claims: one position, two charts, no crossings."""
+        """The fixture is what it claims: one position, two charts, neither fault."""
         attributes, indices = self._two_charts()
         sequence = collapse_sequence(attributes, indices)
         copies = np.bincount(sequence.vertex_point, minlength=len(sequence.points))
         assert int(np.sum(copies > 1)) > 8, 'the seam did not weld into shared points'
-        assert not np.any(self._crossings(attributes, indices))
+        assert not np.any(self._torn(attributes, indices))
+        assert not np.any(self._adrift(attributes, indices))
 
-    def test_no_triangle_ends_up_spanning_both_charts(self):
-        """Each surviving triangle still samples from one chart or the other."""
+    def test_no_triangle_ever_reads_the_wrong_chart(self):
+        """The guarantee that holds without asking for anything.
+
+        Each corner takes the copy nearest in attribute space and the end drawn
+        at more coordinates keeps them, so neither side of a seam is ever left
+        with the other side's coordinate -- however far the reduction goes.
+        """
         attributes, indices = self._two_charts()
         sequence = collapse_sequence(attributes, indices)
         for target in (256, 64, 16):
             result = sequence.at(target_count=target)
-            crossed = self._crossings(result.attributes, result.indices)
-            assert not np.any(crossed), '%d triangles: %d of them cross the seam' % (
+            torn = self._torn(result.attributes, result.indices)
+            assert not np.any(torn), '%d triangles: %d of them sample across the atlas' % (
                 result.triangle_count,
-                int(np.sum(crossed)),
+                int(np.sum(torn)),
             )
+
+    def test_lock_seams_holds_the_seam_on_its_own_line(self):
+        """And what asking for `lock_seams` buys on top: the seam does not move.
+
+        Without it a seam point may merge with a point inside a chart, which
+        moves the merged point off the seam while the coordinate it carries
+        stays where the seam was.
+        """
+        attributes, indices = self._two_charts()
+        loose = collapse_sequence(attributes, indices)
+        held = collapse_sequence(
+            attributes, indices, SimplifyOptions(target_ratio=1.0, lock_seams=True)
+        )
+        for target in (256, 64):
+            wander = self._adrift(*_mesh_of(loose.at(target_count=target)))
+            still = self._adrift(*_mesh_of(held.at(target_count=target)))
+            assert not np.any(still), '%d triangles: %d left the seam' % (
+                target,
+                int(np.sum(still)),
+            )
+            assert np.any(wander), 'nothing drifted at %d, so the case is not covered' % (target,)

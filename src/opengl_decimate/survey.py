@@ -13,10 +13,11 @@ condition preserves topology by construction, which is what it is for. A scan of
 feathers or lace arrives with hundreds and each costs the triangles it takes to
 go round it.
 
-**Seams.** With ``preserve_seams`` on, an edge running off the boundary of a
-texture chart is refused, so the seam network is a floor of its own. An atlas of
-a few large charts costs nothing; one of thousands of small ones is most of the
-model's edges.
+**Seams.** ``seam_share`` is how much of the model is the boundary of a texture
+chart. It is not a floor on its own -- a reduction crosses seams without tearing
+them, keeping each side reading from its own chart -- but it says what
+``lock_seams`` would cost, and a model that is mostly seam is one whose texture
+slides as it coarsens.
 
 :func:`survey` measures all three and puts a floor on what any reduction can
 reach. A caller who finds that floor near the triangle count they started with
@@ -65,8 +66,8 @@ class Survey:
     #: Handles through the surface, from Euler's formula.
     handles: int
     #: The share of edges whose ends are drawn at different numbers of texture
-    #: coordinates, which ``preserve_seams`` refuses. Zero for a mesh carrying
-    #: no texture coordinates.
+    #: coordinates -- the boundary of the texture atlas, and what ``lock_seams``
+    #: refuses. Zero for a mesh carrying no texture coordinates.
     seam_share: float
 
     @property
