@@ -8,3 +8,8 @@
 recursive-include tests *.py
 include tox.ini
 recursive-include docs *.md
+
+# The gallery's pictures are the documentation's, not the package's: five
+# megabytes of PNG in every `pip install` buys a user nothing, and the README
+# names them by absolute URL so they render on PyPI regardless.
+recursive-exclude docs/gallery *
