@@ -969,7 +969,6 @@ def page(reductions: list, described: str) -> str:
             '| Welded to | %s points |' % (f'{reduction.welded_points:,}',),
             '| Reduced in | %.1f s, %s contractions |'
             % (reduction.reduce_s, f'{reduction.contractions:,}'),
-            '| Peak process memory | %.0f MB, the loaded model included |' % (reduction.peak_mb,),
         ]
         if reduction.floor:
             out.append(
@@ -987,6 +986,22 @@ def page(reductions: list, described: str) -> str:
     return '\n'.join(out) + '\n'
 
 
+def where_it_stopped(reduction: Reduction) -> str:
+    """How far down the ladder a subject actually got.
+
+    Three answers. It reached the last rung; it ran out of contractions part
+    way, which is the ``floor``; or it produced a level for every rung and not
+    one of them was the count that rung asked for -- which is the answer a
+    canopy of leaf cards gives, and reads as success unless it is said.
+    """
+    if reduction.floor:
+        return '%s tri' % (f'{reduction.floor:,}',)
+    reached = reduction.levels[-1].triangles
+    if reached > LEVELS[-1] * 1.05:
+        return '%s tri, where %s was asked for' % (f'{reached:,}', f'{LEVELS[-1]:,}')
+    return 'reached the bottom of the chain'
+
+
 def closing(reductions: list) -> list:
     """What the tables above do not say: where a chain stops, and on what box."""
     stopped = [r for r in reductions if r.floor]
@@ -995,8 +1010,7 @@ def closing(reductions: list) -> list:
         '',
         'Some subjects above run out of ladder before they run out of rungs. A'
         ' reduction stops where no contraction is left that keeps the surface a'
-        ' surface, and two properties of the *model* decide where that is.',
-        '',
+        ' surface, and three properties of the *model* decide where that is.'
         ' `opengl_decimate.survey` measures all three off any mesh, before a'
         ' reduction is spent on it.',
         '',
@@ -1035,7 +1049,7 @@ def closing(reductions: list) -> list:
             f'{r.pieces:,}',
             f'{r.handles:,}',
             100.0 * r.seam_share,
-            ('%s tri' % (f'{r.floor:,}',)) if r.floor else 'reached the bottom of the chain',
+            where_it_stopped(r),
         )
         for r in reductions
     ]
@@ -1116,20 +1130,24 @@ def readme_block(reductions: list) -> str:
         '',
     ]
     lines += [
-        '| Subject | Source | Reduced in | Draw at source | Draw at %s |' % (f'{LEVELS[0]:,}',),
-        '|---|---:|---:|---:|---:|',
+        # Named per row rather than in the heading, because a subject whose
+        # atlas or topology stops it never reaches the top of the chain and a
+        # column headed with that count would be saying so of every row.
+        '| Subject | Source | Reduced in | Draw at source | Finest shipped | Draw there |',
+        '|---|---:|---:|---:|---:|---:|',
     ]
     for reduction in reductions:
         fine = next(
             (lvl for lvl in reduction.levels if lvl.triangles <= LEVELS[0]), reduction.levels[-1]
         )
         lines.append(
-            '| %s | %s tri | %.1f s | %.2f ms | %.2f ms |'
+            '| %s | %s tri | %.1f s | %.2f ms | %s tri | %.2f ms |'
             % (
                 reduction.subject.title,
                 f'{reduction.source_triangles:,}',
                 reduction.reduce_s,
                 reduction.levels[0].draw_ms,
+                f'{fine.triangles:,}',
                 fine.draw_ms,
             )
         )
@@ -1202,7 +1220,23 @@ def main(argv: list | None = None) -> int:
     os.environ.setdefault('OPENGLCONTEXT_BACKEND', 'glfw')
 
     reductions = [reduce_subject(subject, not options.no_certify) for subject in wanted]
-    machine = 'Measured on %s.' % (describe_machine(),) if not options.no_render else ''
+    # One high-water mark for the run, not one per subject: `ru_maxrss` only
+    # ever rises, so a per-subject figure would be the largest subject's number
+    # printed against every subject after it.
+    biggest = max(reductions, key=lambda r: r.source_triangles)
+    machine = (
+        'Measured on %s. Reducing every subject took %.1f GB of resident memory at'
+        ' its highest, against %s triangles of %s -- the loaded model, its'
+        ' textures and the recorded sequence together.'
+        % (
+            describe_machine(),
+            max(r.peak_mb for r in reductions) / 1024.0,
+            f'{biggest.source_triangles:,}',
+            biggest.subject.title.lower(),
+        )
+        if not options.no_render
+        else ''
+    )
 
     if not options.no_render:
         from OpenGLContext.meshlod.quality import LODProbe
