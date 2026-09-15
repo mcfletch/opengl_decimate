@@ -1,5 +1,11 @@
 [build-system]
-requires = ["setuptools>=77", "wheel"]
+# Cython and NumPy are required to build the package: everything listed here is
+# installed for every source build, and ``setup.py`` calls ``cythonize`` to
+# produce the compiled reducer. What is optional is the *result* -- a machine
+# with no C compiler still installs, and falls back to the NumPy reduction at
+# import time. Nothing here is optional at runtime; ``dependencies`` below is
+# the whole runtime requirement.
+requires = ["setuptools>=77", "wheel", "Cython>=3.0", "numpy>=2.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -50,6 +56,7 @@ dev = [
     "mypy",
     "ruff",
     "tox>=4.0",
+    "Cython>=3.0",
 ]
 
 [project.urls]
@@ -63,7 +70,9 @@ version = {attr = "opengl_decimate.__version__"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-opengl_decimate = ["py.typed"]
+# The Cython source ships inside the wheel and sdist so a source install can
+# rebuild the reducer rather than only fall back.
+opengl_decimate = ["py.typed", "*.pyx"]
 
 [tool.pytest.ini_options]
 # ``src`` is on testpaths so that the worked examples in the module docstrings
@@ -127,6 +136,29 @@ disallow_incomplete_defs = true
 # fires on nearly every function here that returns an array -- burying the real
 # type errors it would otherwise find. Every other check stays on.
 warn_return_any = false
+
+[tool.cibuildwheel]
+# Stable CPython only. A wheel per platform means an ordinary `pip install`
+# gets the compiled reducer without needing a toolchain, which is the whole
+# point: the NumPy fallback is correct but cannot reduce a scan.
+#
+# Free-threaded builds (`cp313t`, `cp314t`) are not produced: `cp314-*` does not
+# match `cp314t-*`, so adding them is a deliberate act rather than something
+# this pattern does by accident. The reducer holds the GIL throughout and would
+# need auditing before it is offered to a free-threaded interpreter.
+build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
+skip = "*-musllinux_i686 *_i686"
+build-frontend = "build"
+# `setup.py` deliberately treats a failed accelerator build as a warning rather
+# than an error, which is right for a source install on an unknown machine and
+# wrong for a wheel we publish: it would ship as a silently unusable package,
+# since the NumPy path cannot reduce the meshes this exists for. So the wheel is
+# required to carry the extension, and to agree with the NumPy path once it has.
+test-requires = "pytest numpy"
+test-command = [
+    'python -c "from opengl_decimate import native; assert native.ACCELERATED; print(\"reducer: compiled\")"',
+    "pytest -q {project}/tests -o addopts=",
+]
 
 # uv judges whether its cached metadata for a source tree is current from
 # pyproject.toml alone unless told otherwise, and this project's version lives in

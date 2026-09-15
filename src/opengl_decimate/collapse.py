@@ -186,9 +186,10 @@ def contract(mesh: Topology, dying: int, surviving: int, placement: FloatArray) 
     for face in removed:
         mesh.kill_face(face)
 
-    for face in sorted(mesh.vertex_faces[dying]):
+    adjacency = mesh.vertex_faces
+    for face in sorted(adjacency[dying]):
         mesh.faces[face][mesh.faces[face] == dying] = surviving
-        mesh.vertex_faces[surviving].add(face)
-    mesh.vertex_faces[dying] = set()
+        adjacency[surviving].add(face)
+    adjacency[dying].clear()
     mesh.positions[surviving] = placement
     return removed

@@ -197,3 +197,42 @@ class TestToleranceWeldChains:
         indices = np.asarray([0, 5, 6, 4, 5, 6], dtype=np.uint32)
         welded = topology.build(positions, indices, tolerance=step * 1.5)
         assert welded.positions[0][0] == pytest.approx(2.0 * step, rel=1e-3)
+
+
+class TestAdjacencyIsNotBuiltUntilItIsWanted:
+    """771k Python sets cost half a gigabyte before a reduction has started.
+
+    The face-per-vertex adjacency is what the heap schedule walks, and it is
+    the single largest thing a `Topology` holds -- far larger than the arrays
+    it describes. Building it for a caller who only wants to classify a mesh,
+    or who reduces it with a schedule that works in whole arrays, is the
+    difference between a scan fitting in memory and not.
+    """
+
+    def test_building_a_mesh_does_not_build_the_adjacency(self):
+        import tracemalloc
+
+        positions, indices = shapes.grid(300)  # 90,000 points
+        tracemalloc.start()
+        try:
+            mesh = topology.build(positions, indices)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        arrays = mesh.faces.nbytes + mesh.positions.nbytes + mesh.corners.nbytes
+        assert peak < 4 * arrays, (
+            'building a %d-face mesh peaked at %.0f MB against %.0f MB of arrays'
+            % (mesh.face_count, peak / 1e6, arrays / 1e6)
+        )
+
+    def test_the_adjacency_is_still_there_when_asked_for(self):
+        mesh = topology.build(*shapes.icosphere(1))
+        for index, face in enumerate(mesh.faces):
+            for point in face:
+                assert index in mesh.vertex_faces[point]
+
+    def test_classifying_a_mesh_needs_no_adjacency(self):
+        """Classification is whole-array work and must not drag the sets in."""
+        mesh = topology.build(*shapes.grid(120))
+        mesh.classify()
+        assert mesh.adjacency_built is False

@@ -228,3 +228,12 @@ class TestCostOfOneContraction:
             tracemalloc.stop()
         assert counted == before - 2
         assert peak < 10_000
+
+
+class TestNothingToDistort:
+    def test_a_contraction_with_no_surviving_faces_distorts_nothing(self):
+        """An isolated triangle: both faces on the edge go, and nothing is left
+        whose shape could have been damaged."""
+        positions = np.asarray([(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)], dtype='f4')
+        mesh = topology.build(positions, np.asarray([0, 1, 2], dtype=np.uint32))
+        assert not collapse.would_distort(mesh, 0, 1, mesh.positions[1])

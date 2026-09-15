@@ -68,10 +68,51 @@ jobs:
               ;;
           esac
 
-  # Pure Python: one wheel serves every platform and interpreter, so there is no
-  # per-runner build matrix here.
-  build:
-    name: wheel and sdist
+  # Binary wheels carry the compiled reducer, so an ordinary `pip install` gets
+  # it without needing a toolchain. That matters more here than for most
+  # accelerators: the NumPy fallback is correct but cannot reduce the meshes
+  # this package exists for, so a user without a wheel and without a compiler
+  # has a package that works only on toys.
+  #
+  # What these three runners produce, since the label does not say:
+  #
+  #   ubuntu-latest    x86_64  manylinux and musllinux
+  #   macos-latest     arm64   Apple silicon only -- `macos-latest` is macOS 26
+  #                            Arm64, so no Intel Mac wheel is built here
+  #   windows-latest   x86_64  win32 and win_amd64
+  #
+  # Linux arm64 (`ubuntu-24.04-arm`) and Intel macOS (`macos-26-intel`) are
+  # available as runners and are not used: each is a row that costs build
+  # minutes, and neither platform has been asked for. Adding a row is all it
+  # takes -- cibuildwheel builds natively for whichever machine it is on.
+  wheels:
+    name: wheels · ${{ matrix.os }}
+    needs: version
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Build wheels
+        # Build config (targets, skips, test-command) lives in pyproject.toml
+        # under [tool.cibuildwheel]. The test command there refuses a wheel that
+        # did not carry the extension.
+        run: |
+          python -m pip install --upgrade pip "cibuildwheel>=3.1"
+          python -m cibuildwheel --output-dir wheelhouse
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: ./wheelhouse/*.whl
+
+  sdist:
+    name: sdist
     needs: version
     if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
@@ -80,10 +121,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Build
+      - name: Build the sdist
         run: |
           python -m pip install --upgrade pip build twine
-          python -m build
+          python -m build --sdist
       - name: Check the metadata renders on PyPI
         run: python -m twine check --strict dist/*
       # The version the check job read and the version actually built have to be
@@ -95,20 +136,22 @@ jobs:
         run: test -f "dist/opengl_decimate-$EXPECTED.tar.gz"
       - uses: actions/upload-artifact@v4
         with:
-          name: dist
-          path: ./dist/*
+          name: sdist
+          path: ./dist/*.tar.gz
 
   publish:
     name: publish to PyPI
-    needs: [tests, version, build]
-    # The `needs:` gate already requires all three; stating the results as well
+    needs: [tests, version, wheels, sdist]
+    # The `needs:` gate already requires all four; stating the results as well
     # keeps the guarantee if someone later edits this workflow -- adding
     # `always()` to one job would otherwise let a red or partial build reach
-    # PyPI, and a release cannot be taken back.
+    # PyPI, and a release that shipped only the sdist because one wheel failed
+    # cannot be taken back.
     if: >-
       needs.tests.result == 'success' &&
       needs.version.outputs.publish == 'true' &&
-      needs.build.result == 'success'
+      needs.wheels.result == 'success' &&
+      needs.sdist.result == 'success'
     runs-on: ubuntu-latest
 
     # Trusted publishing (OIDC): on PyPI, add a publisher for this repository

@@ -30,7 +30,7 @@ from typing import Any
 
 import numpy as np
 
-from opengl_decimate import certify, collapse, quadrics, topology
+from opengl_decimate import certify, collapse, native, quadrics, topology
 from opengl_decimate.options import SimplifyOptions
 from opengl_decimate.sequence import CollapseSequence, SimplifyResult
 from opengl_decimate.topology import Topology, VertexClass
@@ -102,10 +102,13 @@ def _reduce(
     engine = _Engine(mesh, options)
     if mesh.face_count:
         limit = 0 if exhaust else engine.face_limit
-        runner: Callable[[int], None] = (
-            engine.run_heap if options.schedule == 'heap' else engine.run_multiple_choice
-        )
-        runner(limit)
+        if options.schedule == 'heap' and native.ACCELERATED:
+            engine.run_native(limit)
+        else:
+            runner: Callable[[int], None] = (
+                engine.run_heap if options.schedule == 'heap' else engine.run_multiple_choice
+            )
+            runner(limit)
     return engine.record(dict(attributes))
 
 
@@ -143,6 +146,24 @@ class _Engine:
         self._placement: list[Any] = []
         self._deviation: list[float] = []
         self.removed_at = np.full(len(mesh.faces), -1, dtype=np.int64)
+        #: Set by the compiled path, which returns its log as arrays rather
+        #: than appending to the lists above.
+        self._compiled: tuple[Any, ...] | None = None
+
+    def run_native(self, limit: int) -> None:
+        """The same reduction, through the compiled loop."""
+        self._compiled = native.reduce_mesh(
+            self.mesh,
+            self.quadrics,
+            self.weights,
+            self.kinds,
+            limit,
+            self.options.placement,
+            self.options.max_normal_flip,
+            self.options.min_triangle_quality,
+            self.error_limit,
+        )
+        self.removed_at = np.asarray(self._compiled[4], dtype=np.int64)
 
     def _face_limit(self) -> int:
         """The triangle count to stop at, from whichever targets were given.
@@ -363,6 +384,21 @@ class _Engine:
 
     def record(self, attributes: dict[str, np.ndarray]) -> CollapseSequence:
         """Everything the reduction did, as the replayable sequence."""
+        if self._compiled is not None:
+            dying, surviving, placement, deviation, removed_at = self._compiled
+            return CollapseSequence(
+                points=self.origin_positions,
+                faces=self.origin_faces,
+                corners=self.origin_corners,
+                vertex_point=self.mesh.vertex_point,
+                attributes=attributes,
+                dying=dying,
+                surviving=surviving,
+                placement=placement,
+                deviation=deviation,
+                removed_at=removed_at,
+                recompute_normals=self.options.recompute_normals,
+            )
         count = len(self._dying)
         return CollapseSequence(
             points=self.origin_positions,

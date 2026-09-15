@@ -171,10 +171,39 @@ class Topology:
         # asks how many faces are left once per contraction, and scanning a
         # million flags to answer costs more than the contraction does.
         self._alive_count = len(self.faces)
-        self.vertex_faces: list[set[int]] = [set() for _ in range(len(self.positions))]
-        for index, face in enumerate(self.faces):
-            for point in face:
-                self.vertex_faces[point].add(index)
+        self._vertex_faces: list[set[int]] | None = None
+
+    @property
+    def adjacency_built(self) -> bool:
+        """Whether the per-point face sets have been built yet."""
+        return self._vertex_faces is not None
+
+    @property
+    def vertex_faces(self) -> list[set[int]]:
+        """The live faces on each point, built the first time it is asked for.
+
+        A set per point is the largest thing this object holds -- far larger
+        than the arrays it describes, since a scan has hundreds of thousands of
+        points and a Python set costs hundreds of bytes empty. Welding,
+        classifying and any schedule that works in whole arrays need none of it,
+        so it is not built until something walks the surface point by point.
+        """
+        if self._vertex_faces is None:
+            built: list[set[int]] = [set() for _ in range(len(self.positions))]
+            for index in np.flatnonzero(self.alive):
+                for point in self.faces[index]:
+                    built[point].add(int(index))
+            self._vertex_faces = built
+        return self._vertex_faces
+
+    def forget_adjacency(self) -> None:
+        """Drop the face sets, so whole-array work does not carry them.
+
+        A schedule that rewrites the faces in bulk leaves them wrong, and
+        rebuilding on the next ask is both cheaper and safer than maintaining
+        them through work that does not use them.
+        """
+        self._vertex_faces = None
 
     @property
     def vertex_count(self) -> int:
@@ -186,12 +215,26 @@ class Topology:
         """How many triangles are still alive."""
         return self._alive_count
 
+    def set_live_count(self, count: int) -> None:
+        """Tell the mesh how many faces are alive, after a bulk rewrite.
+
+        The compiled reducer flips the flags itself, so the running total it
+        left behind has to be handed back rather than inferred.
+        """
+        self._alive_count = int(count)
+
     def kill_face(self, face: int) -> None:
-        """Remove a face from the live surface and from its points' adjacency."""
+        """Remove a face from the live surface and from its points' adjacency.
+
+        The adjacency is only updated where it exists: asking for it here would
+        build half a gigabyte of sets on behalf of a caller that never wanted
+        them.
+        """
         self.alive[face] = False
         self._alive_count -= 1
-        for point in self.faces[face]:
-            self.vertex_faces[point].discard(face)
+        if self._vertex_faces is not None:
+            for point in self.faces[face]:
+                self._vertex_faces[point].discard(face)
 
     def neighbours(self, point: int) -> set[int]:
         """The points joined to ``point`` by a live triangle."""
