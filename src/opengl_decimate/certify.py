@@ -27,10 +27,21 @@ from opengl_decimate.types import FloatArray, IndexArray
 
 __all__ = ['Deviation', 'distance_to_mesh', 'sample_surface', 'surface_deviation']
 
-#: Points are measured against triangles in blocks of this many at a time. The
-#: distance is exact whatever this is; it only decides how much memory the
-#: measurement asks for at once.
+#: Most points compared against triangles at once. The distance is exact
+#: whatever this is; it only decides how much memory the measurement asks for.
 BLOCK = 256
+
+#: Ceiling on one block of the comparison. Every point is tested against every
+#: triangle, so the work is the product of the two counts -- and so is the
+#: memory, unless the product is what gets divided up rather than one side of
+#: it. A 1.5M-triangle reference against 256 points at a time is nine gigabytes
+#: of temporaries for a single block, which is not a slow measurement but a dead
+#: process. Blocking both ways bounds it here regardless of either count.
+BLOCK_BYTES = 64 * 1024 * 1024
+
+#: Doubles held per point-triangle pair while the closest point is found: the
+#: seven vectors and the dozen or so scalars in :func:`_closest_on_triangles`.
+_PER_PAIR = 33
 
 _TINY = 1e-30
 
@@ -64,14 +75,23 @@ def distance_to_mesh(points: FloatArray, positions: FloatArray, indices: IndexAr
         return np.full(len(points), np.inf)
 
     corners = np.asarray(positions, dtype='d')[faces]
+    points_at_once = min(BLOCK, len(points))
+    pairs = max(1, BLOCK_BYTES // (_PER_PAIR * 8))
+    triangles_at_once = max(1, min(len(corners), pairs // points_at_once))
+
     best = np.full(len(points), np.inf)
-    for start in range(0, len(points), BLOCK):
-        block = points[start : start + BLOCK]
-        closest = _closest_on_triangles(block, corners)
-        offsets = closest - block[:, None, :]
-        best[start : start + BLOCK] = np.sqrt(
-            np.min(np.einsum('ijk,ijk->ij', offsets, offsets), axis=1)
-        )
+    for start in range(0, len(points), points_at_once):
+        block = points[start : start + points_at_once]
+        nearest = np.full(len(block), np.inf)
+        for first in range(0, len(corners), triangles_at_once):
+            some = corners[first : first + triangles_at_once]
+            offsets = _closest_on_triangles(block, some) - block[:, None, :]
+            np.minimum(
+                nearest,
+                np.min(np.einsum('ijk,ijk->ij', offsets, offsets), axis=1),
+                out=nearest,
+            )
+        best[start : start + points_at_once] = np.sqrt(nearest)
     return best
 
 

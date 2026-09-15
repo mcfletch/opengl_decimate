@@ -168,3 +168,47 @@ class TestEmptySurfaces:
         found = certify.surface_deviation(*empty, *empty, samples=8)
         assert found.max == float('inf')
         assert found.rms == float('inf')
+
+
+class TestMeasuringABigSurface:
+    """The measurement has to survive the meshes it exists to measure.
+
+    Testing every sample against every triangle costs memory proportional to
+    the product, and on a scan that product is billions: a 1.5M-triangle
+    reference and a block of 256 samples is nine gigabytes of temporaries for
+    one block. The answer is not to allocate it.
+    """
+
+    def test_measuring_against_a_dense_mesh_stays_within_a_budget(self):
+        import tracemalloc
+
+        positions, indices = shapes.icosphere(5)  # 20,480 triangles
+        points = certify.sample_surface(positions, indices, 2000, seed=1)
+        tracemalloc.start()
+        try:
+            certify.distance_to_mesh(points, positions, indices)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        assert peak < 200e6, 'peaked at %.1f GB measuring a 20k-triangle mesh' % (peak / 1e9)
+
+    def test_it_still_gets_the_same_answer(self):
+        """Whatever it does to stay small, the distances must not move."""
+        positions, indices = shapes.icosphere(3)
+        rng = np.random.default_rng(5)
+        probes = rng.normal(size=(200, 3)) * 1.4
+        got = certify.distance_to_mesh(probes, positions, indices)
+
+        # Against the plainest possible statement of the same thing.
+        corners = positions.astype('d')[indices.reshape(-1, 3)]
+        wanted = np.array(
+            [
+                np.min(
+                    np.linalg.norm(
+                        certify._closest_on_triangles(point[None, :], corners)[0] - point, axis=1
+                    )
+                )
+                for point in probes
+            ]
+        )
+        assert got == pytest.approx(wanted)
