@@ -44,19 +44,22 @@ class VertexClass(IntEnum):
 
 
 class _DisjointSet:
-    """Union-find over a fixed range, used to count the fans around a vertex."""
+    """Union-find over a fixed range, for grouping points a tolerance welds.
+
+    No path compression, because the trees never get deep enough to want it:
+    :func:`weld_positions` unions in ascending order and always attaches the
+    larger root to the smaller, so every group ends up a star rooted at its
+    lowest member and a lookup is one hop.
+    """
 
     def __init__(self, count: int) -> None:
         self._parent = np.arange(count, dtype=np.int64)
 
     def find(self, item: int) -> int:
         parent = self._parent
-        root = item
-        while parent[root] != root:
-            root = int(parent[root])
-        while parent[item] != root:
-            parent[item], item = root, int(parent[item])
-        return root
+        while parent[item] != item:
+            item = int(parent[item])
+        return item
 
     def union(self, left: int, right: int) -> None:
         left_root, right_root = self.find(left), self.find(right)
@@ -164,6 +167,10 @@ class Topology:
         self.vertex_point = np.ascontiguousarray(vertex_point, dtype=np.int64)
         #: False once a collapse has removed the face.
         self.alive = np.ones(len(self.faces), dtype=bool)
+        # Kept as a running total rather than counted on demand: a reduction
+        # asks how many faces are left once per contraction, and scanning a
+        # million flags to answer costs more than the contraction does.
+        self._alive_count = len(self.faces)
         self.vertex_faces: list[set[int]] = [set() for _ in range(len(self.positions))]
         for index, face in enumerate(self.faces):
             for point in face:
@@ -177,7 +184,14 @@ class Topology:
     @property
     def face_count(self) -> int:
         """How many triangles are still alive."""
-        return int(np.count_nonzero(self.alive))
+        return self._alive_count
+
+    def kill_face(self, face: int) -> None:
+        """Remove a face from the live surface and from its points' adjacency."""
+        self.alive[face] = False
+        self._alive_count -= 1
+        for point in self.faces[face]:
+            self.vertex_faces[point].discard(face)
 
     def neighbours(self, point: int) -> set[int]:
         """The points joined to ``point`` by a live triangle."""
@@ -204,7 +218,7 @@ class Topology:
         faces = self.live_faces()
         pairs = np.concatenate([faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]], axis=0)
         pairs = np.sort(pairs, axis=1)
-        return np.unique(pairs, axis=0)
+        return _unique_pairs(pairs, self.vertex_count)[0]
 
     def classify(
         self,
@@ -222,7 +236,7 @@ class Topology:
         if len(faces):
             pairs = np.concatenate([faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]], axis=0)
             pairs = np.sort(pairs, axis=1)
-            edges, counts = np.unique(pairs, axis=0, return_counts=True)
+            edges, counts = _unique_pairs(pairs, self.vertex_count)
 
             over = edges[counts > 2].reshape(-1)
             kinds[over] = VertexClass.LOCKED
@@ -239,7 +253,7 @@ class Topology:
             )
             kinds[border_count > 2] = VertexClass.LOCKED
 
-            kinds[self._multi_fan_points(faces, edges, counts)] = VertexClass.LOCKED
+            kinds[_multi_fan_points(faces)] = VertexClass.LOCKED
 
         used = np.zeros(self.vertex_count, dtype=bool)
         used[faces.reshape(-1)] = True
@@ -251,39 +265,94 @@ class Topology:
             kinds[np.asarray(locked, dtype=np.int64)] = VertexClass.LOCKED
         return kinds
 
-    def _multi_fan_points(
-        self, faces: IndexArray, edges: IndexArray, counts: np.ndarray
-    ) -> IndexArray:
-        """Points whose faces form more than one fan -- a bowtie.
 
-        Corners are joined across every interior edge; a point whose corners end
-        up in more than one group is being shared by sheets that only touch.
-        """
-        corner_of = {}
-        for face_index, face in enumerate(faces):
-            for slot, point in enumerate(face):
-                corner_of[(int(point), face_index)] = face_index * 3 + slot
+def _pair_keys(pairs: IndexArray, span: int) -> IndexArray:
+    """Two index columns as one integer each, so a sort is a sort of ``int64``.
 
-        groups = _DisjointSet(len(faces) * 3)
-        face_lookup: dict[tuple[int, int], list[int]] = {}
-        for face_index, face in enumerate(faces):
-            for left, right in ((0, 1), (1, 2), (2, 0)):
-                key = (int(min(face[left], face[right])), int(max(face[left], face[right])))
-                face_lookup.setdefault(key, []).append(face_index)
+    ``np.unique(..., axis=0)`` views every row as a void and compares it byte by
+    byte, which on the millions of edges a scan carries costs several times what
+    an ordinary integer sort does. ``span`` has to exceed anything in the second
+    column for the encoding to be reversible.
+    """
+    return np.asarray(pairs[:, 0], dtype=np.int64) * span + pairs[:, 1]
 
-        for edge, count in zip(edges, counts, strict=True):
-            if count != 2:
-                continue
-            first, second = face_lookup[(int(edge[0]), int(edge[1]))]
-            for point in edge:
-                groups.union(corner_of[(int(point), first)], corner_of[(int(point), second)])
 
-        seen: dict[int, set[int]] = {}
-        for (point, _face), corner in corner_of.items():
-            seen.setdefault(point, set()).add(groups.find(corner))
-        return np.asarray(
-            [point for point, roots in seen.items() if len(roots) > 1], dtype=np.int64
-        )
+def _unique_pairs(pairs: IndexArray, span: int) -> tuple[IndexArray, np.ndarray]:
+    """The distinct rows of a two-column index array, and how often each occurs."""
+    keys, counts = np.unique(_pair_keys(pairs, span), return_counts=True)
+    return np.stack([keys // span, keys % span], axis=1), counts
+
+
+def _paired_half_edges(faces: IndexArray) -> tuple[IndexArray, IndexArray]:
+    """For every edge with exactly two faces, the corners each face puts on it.
+
+    A corner is identified by ``face * 3 + slot``. Returns two arrays naming
+    corners that sit at the same point on the same edge, so joining each pair
+    walks a fan from one face to the next.
+    """
+    count = len(faces)
+    slot = np.arange(3, dtype=np.int64)
+    following = np.asarray([1, 2, 0], dtype=np.int64)
+    here = faces.reshape(-1)
+    there = faces[:, following].reshape(-1)
+    corner_here = (np.arange(count, dtype=np.int64)[:, None] * 3 + slot).reshape(-1)
+    corner_there = (np.arange(count, dtype=np.int64)[:, None] * 3 + following).reshape(-1)
+
+    # Orient every half-edge the same way, so the two that share an edge name
+    # their corners in the same order and can be paired off directly.
+    backwards = here > there
+    low = np.where(backwards, there, here)
+    high = np.where(backwards, here, there)
+    corner_low = np.where(backwards, corner_there, corner_here)
+    corner_high = np.where(backwards, corner_here, corner_there)
+
+    order = np.lexsort((high, low))
+    opens = np.empty(len(order), dtype=bool)
+    opens[0] = True
+    opens[1:] = (low[order][1:] != low[order][:-1]) | (high[order][1:] != high[order][:-1])
+    sizes = np.bincount(np.cumsum(opens) - 1)
+    starts = np.flatnonzero(opens)[sizes == 2]
+
+    first, second = order[starts], order[starts + 1]
+    return (
+        np.concatenate([corner_low[first], corner_high[first]]),
+        np.concatenate([corner_low[second], corner_high[second]]),
+    )
+
+
+def _connected(links_from: IndexArray, links_to: IndexArray, count: int) -> IndexArray:
+    """Label every item by its connected component, as whole-array rounds.
+
+    Hooking each end of a link onto the lower of the two labels and then
+    pointer-jumping until nothing moves. A fan is a handful of faces, so the
+    components here are tiny and this settles in a few rounds whatever the size
+    of the mesh.
+    """
+    label = np.arange(count, dtype=np.int64)
+    while True:
+        lowest = np.minimum(label[links_from], label[links_to])
+        np.minimum.at(label, links_from, lowest)
+        np.minimum.at(label, links_to, lowest)
+        while True:
+            jumped = label[label]
+            if np.array_equal(jumped, label):
+                break
+            label = jumped
+        if np.array_equal(label[links_from], label[links_to]):
+            return label
+
+
+def _multi_fan_points(faces: IndexArray) -> IndexArray:
+    """Points whose faces form more than one fan -- a bowtie.
+
+    Corners are joined across every interior edge; a point whose corners end up
+    in more than one group is being shared by sheets that only touch. Counting
+    faces and edges cannot answer this -- two closed fans around one point have
+    as many of each as one does -- so the fans are actually walked.
+    """
+    label = _connected(*_paired_half_edges(faces), count=faces.size)
+    fans = np.unique(_pair_keys(np.stack([faces.reshape(-1), label], axis=1), faces.size))
+    return np.flatnonzero(np.bincount(fans // faces.size) > 1)
 
 
 def build(positions: FloatArray, indices: IndexArray, tolerance: float = 0.0) -> Topology:

@@ -140,11 +140,17 @@ def grid(side: int = 5, bump: float = 0.0):
     gx, gz = np.meshgrid(axis, axis, indexing='ij')
     gy = bump * np.cos(gx * np.pi / 2.0) * np.cos(gz * np.pi / 2.0)
     positions = np.stack([gx, gy, gz], axis=-1).reshape(-1, 3)
-    faces = []
-    for i in range(side - 1):
-        for j in range(side - 1):
-            a = i * side + j
-            faces += [(a, a + 1, a + side), (a + 1, a + side + 1, a + side)]
+    # Built with array arithmetic rather than a loop over cells: the performance
+    # tests want a patch of hundreds of thousands of triangles, and generating
+    # one has to cost less than what it is being used to measure.
+    i, j = np.meshgrid(np.arange(side - 1), np.arange(side - 1), indexing='ij')
+    corner = (i * side + j).reshape(-1)
+    faces = np.concatenate(
+        [
+            np.stack([corner, corner + 1, corner + side], axis=1),
+            np.stack([corner + 1, corner + side + 1, corner + side], axis=1),
+        ]
+    )
     return _mesh(positions, faces)
 
 

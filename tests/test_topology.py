@@ -131,3 +131,69 @@ class TestClassification:
         assert kinds[3] == topology.VertexClass.LOCKED
         assert kinds[7] == topology.VertexClass.LOCKED
         assert np.count_nonzero(kinds == topology.VertexClass.LOCKED) == 2
+
+
+def _two_closed_fans():
+    """Two closed tetrahedral shells sharing exactly one point.
+
+    The counting rules cannot tell this from a single closed fan -- both have as
+    many faces around the point as edges -- so it is the case that decides
+    whether fan connectivity is really being computed.
+    """
+    lower = np.asarray(
+        [(0.0, 0.0, 0.0), (1.0, -1.0, 1.0), (1.0, -1.0, -1.0), (-1.0, -1.0, 0.0)], dtype='f4'
+    )
+    upper = lower * np.asarray([1.0, -1.0, 1.0], dtype='f4')
+    positions = np.concatenate([lower, upper[1:]])
+    faces = [(0, 1, 2), (0, 3, 1), (0, 2, 3), (1, 3, 2), (0, 5, 4), (0, 4, 6), (0, 6, 5), (4, 5, 6)]
+    return positions, np.asarray(faces, dtype=np.uint32).reshape(-1)
+
+
+class TestFanConnectivity:
+    def test_a_point_shared_by_two_closed_shells_is_locked(self):
+        mesh = topology.build(*_two_closed_fans())
+        kinds = mesh.classify()
+        assert kinds[0] == topology.VertexClass.LOCKED
+        assert np.all(kinds[1:] == topology.VertexClass.MANIFOLD)
+
+    def test_classification_keeps_up_with_a_large_mesh(self):
+        """A scan is millions of triangles; classification is one pass over it.
+
+        The bound is loose enough not to measure the machine, and far below what
+        a per-corner Python pass costs at this size.
+        """
+        import time
+
+        mesh = topology.build(*shapes.grid(300))
+        assert mesh.face_count > 175_000
+        start = time.perf_counter()
+        mesh.classify()
+        assert time.perf_counter() - start < 0.5
+
+
+class TestToleranceWeldChains:
+    def test_a_run_of_points_each_near_the_next_becomes_one(self):
+        """Welding is transitive: a chain collapses even though its ends are
+        further apart than the tolerance. That is what a scan needs, where a
+        seam is reconstructed as a smear of points rather than as a pair."""
+        step = 4e-6
+        positions = np.asarray(
+            [(i * step, 0.0, 0.0) for i in range(5)] + [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+            dtype='f4',
+        )
+        indices = np.asarray([0, 5, 6, 4, 5, 6, 2, 5, 6], dtype=np.uint32)
+        loose = topology.build(positions, indices, tolerance=1e-7)
+        assert loose.vertex_count == 7
+        welded = topology.build(positions, indices, tolerance=step * 1.5)
+        # The five stepping points are one; the far two are themselves.
+        assert welded.vertex_count == 3
+
+    def test_the_welded_point_sits_at_the_middle_of_its_run(self):
+        step = 4e-6
+        positions = np.asarray(
+            [(i * step, 0.0, 0.0) for i in range(5)] + [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+            dtype='f4',
+        )
+        indices = np.asarray([0, 5, 6, 4, 5, 6], dtype=np.uint32)
+        welded = topology.build(positions, indices, tolerance=step * 1.5)
+        assert welded.positions[0][0] == pytest.approx(2.0 * step, rel=1e-3)

@@ -117,6 +117,11 @@ def _surviving_corners(
     Returns two ``(n, 3, 3)`` arrays of corner positions. The faces on the edge
     itself are excluded: they are removed by the contraction, so how they would
     have looked is not a question.
+
+    Only the corners of the affected faces are gathered. The contraction moves
+    one point, and building the whole moved mesh to read a dozen corners out of
+    it would make every contraction cost as much as the mesh is big -- which on
+    a scan is what turns the reduction into quadratic work.
     """
     affected = sorted(
         (mesh.vertex_faces[dying] | mesh.vertex_faces[surviving])
@@ -124,9 +129,8 @@ def _surviving_corners(
     )
     faces = mesh.faces[affected]
     before = mesh.positions[faces]
-    moved = mesh.positions.copy()
-    moved[surviving] = placement
-    after = moved[np.where(faces == dying, surviving, faces)]
+    after = before.copy()
+    after[(faces == dying) | (faces == surviving)] = placement
     return before, after
 
 
@@ -180,9 +184,7 @@ def contract(mesh: Topology, dying: int, surviving: int, placement: FloatArray) 
     """
     removed = sorted(mesh.edge_faces(dying, surviving))
     for face in removed:
-        mesh.alive[face] = False
-        for point in mesh.faces[face]:
-            mesh.vertex_faces[point].discard(face)
+        mesh.kill_face(face)
 
     for face in sorted(mesh.vertex_faces[dying]):
         mesh.faces[face][mesh.faces[face] == dying] = surviving

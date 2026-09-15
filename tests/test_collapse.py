@@ -168,3 +168,63 @@ class TestDegenerateAsks:
     def test_a_surface_with_no_triangles_has_no_edges(self):
         mesh = topology.build(np.zeros((0, 3), dtype='f4'), np.zeros((0,), dtype=np.uint32))
         assert mesh.edges().shape == (0, 2)
+
+
+class TestCostOfOneContraction:
+    """A contraction touches one neighbourhood, and must read only that.
+
+    A scan is millions of triangles. Anything in the inner loop that reads,
+    copies or scans the whole mesh makes each contraction cost as much as the
+    mesh is big, which turns the reduction into quadratic work and never
+    finishes. Asserted by watching what is allocated rather than by timing,
+    so it is a fact about the code rather than about the machine.
+    """
+
+    @staticmethod
+    def _big():
+        mesh = topology.build(*shapes.grid(400))  # 160,000 points
+        middle = 400 * 200 + 200
+        return mesh, middle, int(next(iter(mesh.neighbours(middle))))
+
+    def test_testing_the_placement_allocates_a_neighbourhood_not_a_mesh(self):
+        import tracemalloc
+
+        mesh, dying, surviving = self._big()
+        placement = mesh.positions[surviving]
+        tracemalloc.start()
+        try:
+            collapse.would_distort(mesh, dying, surviving, placement)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        # The mesh's positions alone are 160,000 * 3 * 8 bytes.
+        assert peak < 200_000, 'allocated %.1f MB to test one contraction' % (peak / 1e6)
+
+    def test_applying_it_allocates_a_neighbourhood_not_a_mesh(self):
+        import tracemalloc
+
+        mesh, dying, surviving = self._big()
+        placement = mesh.positions[surviving]
+        tracemalloc.start()
+        try:
+            collapse.contract(mesh, dying, surviving, placement)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        assert peak < 200_000, 'allocated %.1f MB to apply one contraction' % (peak / 1e6)
+
+    def test_counting_the_live_faces_does_not_scan_them(self):
+        """It is asked once per contraction, so it cannot be a pass over the mesh."""
+        import tracemalloc
+
+        mesh, dying, surviving = self._big()
+        before = mesh.face_count
+        collapse.contract(mesh, dying, surviving, mesh.positions[surviving])
+        tracemalloc.start()
+        try:
+            counted = mesh.face_count
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        assert counted == before - 2
+        assert peak < 10_000
