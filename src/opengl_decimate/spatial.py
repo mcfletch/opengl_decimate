@@ -108,6 +108,11 @@ class CellGrid:
         self._occupied = ordered[self._starts]
         self._sizes = np.diff(np.append(self._starts, len(ordered)))
 
+    @property
+    def occupied(self) -> int:
+        """How many cells hold anything, which is what an average is over."""
+        return len(self._occupied)
+
     def key(self, cells: IndexArray) -> np.ndarray:
         """One comparable value per cell coordinate."""
         strides = self._strides

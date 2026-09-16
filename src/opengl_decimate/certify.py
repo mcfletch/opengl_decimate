@@ -48,10 +48,6 @@ _PER_PAIR = 33
 #: building a grid to avoid comparing them.
 _SCAN_PAIRS = 1 << 22
 
-#: Once this few points are still unsettled, measuring them against every
-#: triangle costs less than searching one more ring of cells for them.
-_SCAN_REMAINDER = 64
-
 #: Cells a triangle may be registered in, averaged over the mesh. The cell side
 #: is doubled until the grid is this economical, which is what stops one large
 #: triangle in an otherwise fine mesh from filling it.
@@ -165,6 +161,26 @@ def _register(low: IndexArray, high: IndexArray) -> tuple[IndexArray, IndexArray
     return low[owner] + inside, owner
 
 
+def scan_is_cheaper(ring_cells: int, per_cell: float, triangles: int) -> bool:
+    """Whether measuring the waiting points against every triangle costs less.
+
+    Both sides are paid per waiting point, so the points cancel and what is left
+    is a comparison of triangles tested: one more ring asks for the triangles in
+    its cells, and a scan asks for the whole reference.
+
+    The currency matters. Comparing a *count of points* or a *count of cells*
+    against a count of triangles -- which is the mistake this replaces -- reads
+    as a sensible rule and is out by whatever the two units differ by. On a mesh
+    of a million triangles at eight to a cell, one more ring of three hundred
+    cells is two thousand tests a point and the scan is a million: a factor of
+    four hundred, spent on the handful of points that had almost arrived.
+
+    A grid holding nothing makes every ring free, which would widen the search
+    for ever; there is nothing out there to find, so it scans instead.
+    """
+    return not per_cell or ring_cells * per_cell >= triangles
+
+
 def _nearest_by_grid(points: FloatArray, corners: FloatArray) -> FloatArray:
     """Distance from each point to the nearest triangle, through a uniform grid.
 
@@ -175,11 +191,9 @@ def _nearest_by_grid(points: FloatArray, corners: FloatArray) -> FloatArray:
     improve it and the answer is exact. Points not yet settled go round again
     one ring wider.
 
-    The widening stops where it stops paying: a ring of ``n`` cells costs ``n``
-    lookups for each point still waiting, and measuring one of those against
-    every triangle costs the triangle count -- so once the ring is the larger of
-    the two, or few enough points are left to make the grid beside the point,
-    the remainder is scanned and the answer is exact either way.
+    The widening stops where it stops paying -- see :func:`scan_is_cheaper` --
+    and whatever is still waiting is measured against every triangle. Both
+    routes are exact, so the rule decides only what the answer costs.
     """
     low, high = np.min(corners, axis=1), np.max(corners, axis=1)
     side = _grid_side(low, high)
@@ -191,10 +205,11 @@ def _nearest_by_grid(points: FloatArray, corners: FloatArray) -> FloatArray:
     at = np.floor(points / side).astype(np.int64)
     best = np.full(len(points), np.inf)
     pending = np.arange(len(points), dtype=np.int64)
-    radius, searched = 0, 0
-    while len(pending) > _SCAN_REMAINDER and searched < len(corners):
+    # What one cell of the ring is worth asking for, averaged over the grid.
+    per_cell = len(cells) / grid.occupied if grid.occupied else 0.0
+    radius = 0
+    while len(pending) and not scan_is_cheaper(shell_size(radius), per_cell, len(corners)):
         offsets = np.asarray(shell(radius), dtype=np.int64)
-        searched += shell_size(radius)
         here = at[pending]
         # Whole rings at a time rather than a cell at a time: a ring past the
         # first few holds hundreds of cells, and asking for each on its own

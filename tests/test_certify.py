@@ -308,3 +308,48 @@ class TestTheGridGivesTheSameAnswerAsTheScan:
         probes = np.asarray([(0.25, 0.25, 2.0), (5.0, 0.0, 0.0), (-1.0, 0.5, 0.0)])
         corners = _TRIANGLE[0][_TRIANGLE[1].reshape(-1, 3)]
         assert certify._nearest_by_grid(probes, corners) == pytest.approx([2.0, 4.0, 1.0])
+
+
+class TestWhenToStopSearchingAndJustScan:
+    """The grid search gives up at the point where giving up is cheaper.
+
+    Widening the search by one ring costs every waiting point the triangles in
+    that ring; scanning costs every waiting point the *whole* reference. So the
+    comparison is between those two, and it has to be made in triangles tested
+    rather than in points or cells, which are not the same currency. On a
+    million-triangle reference the difference is three orders of magnitude, and
+    getting it wrong means the last handful of points cost more than every other
+    point put together.
+    """
+
+    def test_a_ring_that_is_cheaper_than_the_whole_mesh_is_searched(self):
+        # 300 cells of 8 triangles is 2,400 tests a point; the mesh is a
+        # million. Widening wins by a wide margin.
+        assert not certify.scan_is_cheaper(ring_cells=300, per_cell=8.0, triangles=1_000_000)
+
+    def test_a_ring_that_costs_more_than_the_whole_mesh_is_not(self):
+        assert certify.scan_is_cheaper(ring_cells=300, per_cell=8.0, triangles=2_000)
+
+    def test_a_small_reference_is_scanned_almost_at_once(self):
+        """Which is what makes the fallback right for the meshes it suits."""
+        assert certify.scan_is_cheaper(ring_cells=26, per_cell=4.0, triangles=64)
+
+    def test_an_empty_grid_stops_rather_than_widening_for_ever(self):
+        """Free rings would otherwise be searched without end."""
+        assert certify.scan_is_cheaper(ring_cells=26, per_cell=0.0, triangles=10)
+
+    def test_the_far_point_of_a_dense_mesh_is_still_measured_exactly(self):
+        """The rule may only change what it costs, never what it answers."""
+        rng = np.random.default_rng(5)
+        positions, indices = shapes.icosphere(4)
+        # Points well outside the sphere, so the search has to widen for them,
+        # and points on it, which settle in the first ring.
+        outside = rng.normal(size=(64, 3))
+        outside = 3.0 * outside / np.linalg.norm(outside, axis=1)[:, None]
+        on = certify.sample_surface(positions, indices, 64, seed=1)
+        points = np.concatenate([outside, on])
+
+        through_the_grid = certify.distance_to_mesh(points, positions, indices)
+        corners = np.asarray(positions, dtype='d')[np.asarray(indices).reshape(-1, 3)]
+        by_hand = np.sqrt(certify._nearest_among(np.asarray(points, dtype='d'), corners))
+        assert np.allclose(through_the_grid, by_hand, atol=1e-9)

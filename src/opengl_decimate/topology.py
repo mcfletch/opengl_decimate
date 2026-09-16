@@ -477,23 +477,31 @@ def _paired_half_edges(faces: IndexArray) -> tuple[IndexArray, IndexArray]:
 def _connected(links_from: IndexArray, links_to: IndexArray, count: int) -> IndexArray:
     """Label every item by its connected component, as whole-array rounds.
 
-    Hooking each end of a link onto the lower of the two labels and then
-    pointer-jumping until nothing moves. A fan is a handful of faces, so the
-    components here are tiny and this settles in a few rounds whatever the size
-    of the mesh.
+    Each round points the higher of a link's two **roots** at the lower, then
+    pointer-jumps until every item names a root again. Hooking roots rather than
+    the items themselves is what makes this settle in a number of rounds that
+    grows with the logarithm of the longest chain rather than with its length:
+    an item's label already reaches its root, so moving the root moves
+    everything under it at once, while moving the item moves only the item and
+    the news travels one link per round.
+
+    The difference is the whole cost on anything but a fan. A photogrammetry
+    scan's surface is a handful of components over millions of corners, and a
+    texture atlas is a hundred or so; those are the chains that are long.
     """
     label = np.arange(count, dtype=np.int64)
     while True:
-        lowest = np.minimum(label[links_from], label[links_to])
-        np.minimum.at(label, links_from, lowest)
-        np.minimum.at(label, links_to, lowest)
+        here, there = label[links_from], label[links_to]
+        higher, lower = np.maximum(here, there), np.minimum(here, there)
+        apart = higher != lower
+        if not np.any(apart):
+            return label
+        np.minimum.at(label, higher[apart], lower[apart])
         while True:
             jumped = label[label]
             if np.array_equal(jumped, label):
                 break
             label = jumped
-        if np.array_equal(label[links_from], label[links_to]):
-            return label
 
 
 def _multi_fan_points(faces: IndexArray) -> IndexArray:
