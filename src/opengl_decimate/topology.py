@@ -26,6 +26,7 @@ manifold fan a fan.
 
 from __future__ import annotations
 
+import math
 from enum import IntEnum
 
 import numpy as np
@@ -39,6 +40,7 @@ __all__ = [
     'Topology',
     'build',
     'components',
+    'smoothing_groups',
     'weld_positions',
     'local_origin',
 ]
@@ -504,6 +506,61 @@ def _multi_fan_points(faces: IndexArray) -> IndexArray:
     label = _connected(*_paired_half_edges(faces), count=faces.size)
     fans = np.unique(_pair_keys(np.stack([faces.reshape(-1), label], axis=1), faces.size))
     return np.flatnonzero(np.bincount(fans // faces.size) > 1)
+
+
+def smoothing_groups(
+    positions: FloatArray,
+    faces: IndexArray,
+    corners: IndexArray,
+    normals: FloatArray | None = None,
+    crease_angle: float = 0.0,
+) -> IndexArray:
+    """Which normal each face corner belongs to, as a label per corner.
+
+    A normal is shared by the corners around a point *up to the edges the model
+    is hard across*. Two things say where those are, and either is enough:
+
+    ``normals``
+        What the input drew. A hard-edged export carries one position as several
+        vertices with several normals, and that is the author saying which edges
+        are edges. Corners whose carried normals differ are never accumulated
+        together, so the edge stays.
+    ``crease_angle``
+        The fold itself, in degrees, for a mesh that arrived with no normals or
+        with smooth ones over a geometric edge. Two faces meeting at more than
+        this are not accumulated together.
+
+    Corners are joined across the interior edges that pass both tests and then
+    labelled by connected component, which walks each point's fan and stops
+    wherever the fan is hard. Labels index the flat corner array, so a corner's
+    label is its place in ``faces.reshape(-1)``.
+    """
+    links_from, links_to = _paired_half_edges(faces)
+    if len(links_from):
+        keep = np.ones(len(links_from), dtype=bool)
+        if normals is not None:
+            carried = np.asarray(normals, dtype='d')[np.asarray(corners).reshape(-1)]
+            keep &= np.all(
+                np.isclose(carried[links_from], carried[links_to], rtol=0.0, atol=1e-6), axis=1
+            )
+        if crease_angle > 0.0:
+            plane = _face_normals(np.asarray(positions, dtype='d'), faces)
+            # A corner names its face: the flat index divided by three.
+            meeting = np.einsum('ij,ij->i', plane[links_from // 3], plane[links_to // 3])
+            keep &= meeting >= math.cos(math.radians(crease_angle))
+        links_from, links_to = links_from[keep], links_to[keep]
+    return _connected(links_from, links_to, count=faces.size)
+
+
+def _face_normals(positions: FloatArray, faces: IndexArray) -> FloatArray:
+    """Unit normal of each face; zero where it has no area to take one from."""
+    corners = positions[faces]
+    normal = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
+    length = np.linalg.norm(normal, axis=1)
+    usable = length > 0.0
+    normal[usable] /= length[usable][:, None]
+    normal[~usable] = 0.0
+    return normal
 
 
 def components(faces: IndexArray, count: int) -> IndexArray:

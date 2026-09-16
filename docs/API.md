@@ -82,6 +82,7 @@ zero.
 | `locked` | `Sequence[int] \| None` | `None` | further points to hold, indexed into the welded points — which are the caller's own vertex indices unless vertices were welded |
 | `max_normal_flip` | `float` | `90.0` | degrees a face's normal may turn before the contraction is refused |
 | `min_triangle_quality` | `float` | `0.0` | shape floor: 0 admits any shape, 1 only equilateral |
+| `crease_angle` | `float` | `60.0` | where `recompute_normals` keeps an edge hard, in degrees. Corners further apart than this are not accumulated into one normal. Where the input carries normals they answer alone — they say which edges a model is *smooth* across as well; a mesh with none is asked about its own folds. Zero is flat shading, 180 smooths everything. Read only when `recompute_normals` is on |
 | `placement` | `str` | `'optimal'` | `'optimal'` minimises the summed quadric; `'endpoint'` keeps whichever end of the edge costs less, so every output point is an input point |
 | `lock_seams` | `bool` | `False` | hold the boundaries of the texture atlas exactly, as `lock_boundary` holds the outline: a point drawn at several texture coordinates then merges only with a point drawn at the same number. Off, each side of a seam still reads from its own chart — a corner takes the copy nearest in attribute space, and the end drawn at more coordinates keeps them — but the seam's *line* is not held, so the coordinate it carries slides as the merged point moves. Worth its triangles where the atlas is thousands of small charts and that sliding is most of the surface |
 

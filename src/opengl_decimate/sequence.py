@@ -29,6 +29,7 @@ from typing import Any
 
 import numpy as np
 
+from opengl_decimate import topology
 from opengl_decimate.corners import corner_moves, follow
 from opengl_decimate.types import POSITION, FloatArray, IndexArray
 
@@ -99,6 +100,9 @@ class CollapseSequence:
     deviation: FloatArray
     removed_at: IndexArray
     recompute_normals: bool = False
+    #: Where a recomputed normal keeps an edge hard, in degrees, on top of what
+    #: the input's own normals already say. See ``SimplifyOptions``.
+    crease_angle: float = 0.0
     origin: Any = field(default_factory=lambda: np.zeros(3, dtype='d'))
     #: Triangles the caller handed in, before welding dropped any. A ratio is a
     #: share of these; ``faces`` is what welding left to reduce.
@@ -223,6 +227,7 @@ class CollapseSequence:
             error=error,
             collapses=steps,
             recompute_normals=self.recompute_normals,
+            crease_angle=self.crease_angle,
             input_triangles=self.input_faces or len(self.faces),
             welded_away=(
                 (self.input_faces or len(self.faces)) - len(self.faces) - self.dropped_faces
@@ -266,6 +271,7 @@ def _emit(
     error: float,
     collapses: int,
     recompute_normals: bool,
+    crease_angle: float,
     input_triangles: int,
     welded_away: int,
     dropped_away: int,
@@ -294,11 +300,23 @@ def _emit(
             dropped_away=dropped_away,
         )
 
+    # Which corners share a normal, where one is to be computed. This is part
+    # of what makes a vertex distinct: an edge the model is hard across needs a
+    # vertex per side to *be* hard, and on a mesh that arrived carrying no
+    # normals there is nothing else to tell the two sides apart.
+    group = None
+    if recompute_normals:
+        group = topology.smoothing_groups(
+            positions, faces, corners, attributes.get('NORMAL'), crease_angle
+        )
+
     columns = [flat_points.astype('d')[:, None]]
     carried = [name for name in sorted(attributes) if name != POSITION]
     for name in carried:
         values = np.asarray(attributes[name])[flat_corners]
         columns.append(values.reshape(len(flat_corners), -1).astype('d'))
+    if group is not None:
+        columns.append(group.astype('d')[:, None])
     key = np.concatenate(columns, axis=1)
     _, representative, inverse = np.unique(key, axis=0, return_index=True, return_inverse=True)
     out_index, representative = _first_appearance(inverse.reshape(-1), representative)
@@ -317,8 +335,8 @@ def _emit(
         out_attributes[name] = np.ascontiguousarray(np.asarray(attributes[name])[out_source])
 
     indices = np.ascontiguousarray(out_index.reshape(-1, 3), dtype=np.uint32).reshape(-1)
-    if recompute_normals:
-        out_attributes['NORMAL'] = _surface_normals(positions, faces, out_point)
+    if group is not None:
+        out_attributes['NORMAL'] = _surface_normals(positions, faces, group, representative)
 
     # An input vertex maps to the output vertex that carries its own attributes
     # where one survived, and otherwise to any output vertex at the point it
@@ -341,20 +359,30 @@ def _emit(
     )
 
 
-def _surface_normals(positions: FloatArray, faces: IndexArray, out_point: IndexArray) -> FloatArray:
+def _surface_normals(
+    positions: FloatArray,
+    faces: IndexArray,
+    group: IndexArray,
+    representative: IndexArray,
+) -> FloatArray:
     """Area-weighted vertex normals of the surface as it now stands.
 
-    Accumulated per *point* and then gathered to the output vertices, so every
-    vertex at one position gets one normal. Accumulating per output vertex
-    instead would give each side of a split its own normal -- and an output
-    vertex is split by *attributes*, so a texture seam carrying no geometric
-    meaning at all would come back as a crease in the shading.
+    Accumulated per **smoothing group** -- the corners around a point that the
+    model is smooth across -- and then gathered to the output vertices.
+
+    Per *point* would be too coarse: a hard edge is one position the model draws
+    twice, once per side, and averaging over it turns a cube into a ball. Per
+    *output vertex* would be too fine: an output vertex is split by attributes,
+    so a texture seam carrying no geometric meaning at all would come back as a
+    crease in the shading. The group is the middle of those two, and
+    :func:`~opengl_decimate.topology.smoothing_groups` finds it from the normals
+    the input carried and from the folds in the surface itself.
     """
-    corners = np.asarray(positions, dtype='d')[faces]
-    face_normal = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
-    summed = np.zeros((len(positions), 3), dtype='d')
-    np.add.at(summed, np.asarray(faces).reshape(-1), np.repeat(face_normal, 3, axis=0))
+    at = np.asarray(positions, dtype='d')[faces]
+    face_normal = np.cross(at[:, 1] - at[:, 0], at[:, 2] - at[:, 0])
+    summed = np.zeros((faces.size, 3), dtype='d')
+    np.add.at(summed, group, np.repeat(face_normal, 3, axis=0))
     lengths = np.linalg.norm(summed, axis=1)
     usable = lengths > 0.0
     summed[usable] /= lengths[usable][:, None]
-    return np.ascontiguousarray(summed[out_point], dtype='f4')
+    return np.ascontiguousarray(summed[group[representative]], dtype='f4')

@@ -259,6 +259,27 @@ without any seam-specific machinery.
 Vertices are numbered by first use in the index stream. `vertex_map` relates the
 input's vertices to the output's.
 
+**Normals, where they are recomputed.** `recompute_normals` is what a level a
+game ships wants. A carried normal is the one measured at its own vertex and is
+the more accurate of the two — on the marble bust at 8,000 triangles it sits 1.9
+degrees from the source surface against 5.6 for a recomputed one — but its error
+is uncorrelated between neighbours, and shading shows the *gradient*. So coarse
+levels facet: the three corners of a triangle disagree by 51 degrees on a cliff
+scan at 8,000 where the source's own triangles disagree by 15. Recomputed, they
+disagree by 23, which is the surface.
+
+They are accumulated per **smoothing group**, not per point. Per point is too
+coarse — a hard edge is one position the model draws twice, once per side, and
+averaging over it turns a cube into a ball. Per output *vertex* is too fine —
+an output vertex is split by attributes, so a texture seam carrying no geometric
+meaning would come back as a crease. The group is between the two: corners
+joined across the interior edges the model is smooth across, labelled by
+connected component, which walks each point's fan and stops where the fan is
+hard. Where the input carries normals they say where that is; where it carries
+none, the fold between two faces does. `crease_angle` is the threshold, and the
+group is part of what makes a vertex distinct, because an edge needs a vertex
+per side to be hard at all.
+
 ## 8. Measure what happened
 
 The quadric's own number is an area-weighted root-mean-square distance to the

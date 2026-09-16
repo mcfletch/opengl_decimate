@@ -71,7 +71,12 @@ at more texture coordinates keeps them, so neither side of a seam is ever left
 reading the chart next door; `lock_seams` additionally holds the seam's *line*,
 where the atlas is fragmented enough for that to be worth its triangles.
 `recompute_normals` replaces `NORMAL` with the normals of the surface that is
-left, where carrying the input's is not what you want.
+left, which is what a level a game ships wants: a carried normal is the one
+measured at its own vertex and is the *more* accurate of the two, but its error
+is uncorrelated between neighbours and shading shows the gradient, so coarse
+levels facet. Recomputing accumulates per smoothing group rather than per point,
+so `crease_angle` keeps the edges the model was built hard across and a cube does
+not come back round.
 
 **A recorded reduction, replayed to any target.** `collapse_sequence` runs the
 whole reduction once and records it; `at()` then reaches any triangle count by

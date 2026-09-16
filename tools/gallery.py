@@ -58,8 +58,14 @@ RAW = 'https://raw.githubusercontent.com/mcfletch/opengl_decimate/main/docs/gall
 FIT = 2.6
 
 #: A bundled CC0 studio HDRI, so a level is lit the way an asset is looked at
-#: rather than by one lamp in the dark.
+#: rather than by one lamp in the dark. Only its *light* is wanted: the room it
+#: was photographed in is drawn behind the subject otherwise, and a gallery of
+#: decimations is not improved by a picture of somebody's studio.
 ENVIRONMENT = 'studio_small_03'
+
+#: What is behind the subject instead: one neutral grey, dark enough that a
+#: white marble reads against it and light enough for a dark rock.
+BACKGROUND = '0.21,0.22,0.24'
 
 #: The chain a game would actually ship, in triangles. Past the top of it a
 #: renderer with a world to draw is not going to spend the triangles on one
@@ -150,16 +156,16 @@ SUBJECTS = (
             'of its thirteen components are specks the photogrammetry left behind, '
             'and `drop_components_below` takes them: 572 triangles, which is fifteen '
             'per cent of what the coarsest rung has to spend.\n\n'
-            'This is the subject whose atlas decides the answer, so it is the one '
-            'reduced with `lock_seams`. A third of its edges are on a chart '
-            'boundary, and the chain stops where the seam network is all that is '
-            'left. Without the lock it reaches two thousand triangles, and by eight '
-            'thousand each triangle is already sampling two and a half times the '
-            'texture it should -- the levels are there, but the bird is not on them. '
-            'See **Where a chain stops** below.'
+            'A third of its edges are on a texture chart boundary, which is what '
+            'this subject has to say. `lock_seams` would hold every one of them and '
+            'stop the chain at 57,503 triangles -- a level no game would draw, and '
+            'no chain at all. So it is reduced without, and what that costs is '
+            'visible above: by the coarse rungs each triangle samples several times '
+            'the texture it should, and the feathers go with it. An atlas cut into '
+            'thousands of small charts is a modelling decision that a decimator '
+            'cannot undo. See **Where a chain stops** below.'
         ),
         drop_components_below=0.01,
-        lock_seams=True,
     ),
     Subject(
         slug='rocks',
@@ -171,22 +177,6 @@ SUBJECTS = (
         ),
         rotation=180.0,
         note='Several separate boulders in one mesh, so the reduction has to spend across them.',
-    ),
-    Subject(
-        slug='tree',
-        title='Island tree',
-        source='polyhaven:island_tree_03',
-        credit=(
-            "'Island Tree 03' by Rob Tuytel and Rico Cilliers, from "
-            '[Poly Haven](https://polyhaven.com/a/island_tree_03), CC0'
-        ),
-        rotation=135.0,
-        note=(
-            'The hard case. A canopy of alpha-cut leaf cards barely welds at all -- '
-            '2,085,320 triangles over 1,598,940 points -- because almost no two cards '
-            'share a vertex, and a card cannot be reduced below the triangles that '
-            'carry its cutout.'
-        ),
     ),
     Subject(
         slug='bust',
@@ -488,6 +478,12 @@ def reduce_subject(subject: Subject, certify: bool) -> Reduction:
 
     for index, (count, note) in enumerate(ladder(source_triangles)):
         start = time.perf_counter()
+        # Every level below the source gets the normals of the surface it
+        # actually is -- see ``recompute_normals``, which is what keeps a coarse
+        # level from faceting. The source row keeps the normals it arrived with,
+        # because that row is the model rather than a level of it.
+        for group in groups:
+            group.sequence.recompute_normals = index > 0
         # A target is shared out across the materials in proportion to what each
         # brought, so one level is one triangle budget for the whole model.
         share = count / max(1, source_triangles)
@@ -549,6 +545,12 @@ def externalise(material: Any, where: str, slug: str, seen: dict) -> Any:
     as PNG -- so a subject's seven levels would carry seven copies of its maps,
     and a museum scan's came to four hundred megabytes apiece. Written once and
     named by relative ``uri``, the levels hold geometry and nothing else.
+
+    Written through a temporary name and moved into place, because these are
+    cached between runs and a run that is interrupted part way through an
+    eight-thousand-pixel map would otherwise leave a truncated file that every
+    later run takes for a finished one -- and a texture that fails to load takes
+    its whole primitive out of the picture.
     """
     import copy
 
@@ -567,7 +569,8 @@ def externalise(material: Any, where: str, slug: str, seen: dict) -> Any:
         name = '%s-%d-%s.png' % (slug, len(seen), channel)
         path = os.path.join(where, name)
         if not os.path.exists(path):
-            image.save(path)
+            image.save(path + '.part', format='PNG')
+            os.replace(path + '.part', path)
         swapped[channel] = ExternalImage(uri=name, srgb=channel in COLOUR_CHANNELS)
     copied = copy.copy(material)
     copied.textures = swapped
@@ -629,6 +632,8 @@ def capture(model: str, png: str, yaw: float, margin: float, size: int) -> bool:
             '6',
             '--environment',
             ENVIRONMENT,
+            '--background',
+            BACKGROUND,
         ],
         capture_output=True,
         text=True,
