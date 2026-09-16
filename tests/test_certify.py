@@ -268,8 +268,8 @@ class TestTheGridGivesTheSameAnswerAsTheScan:
         rng = np.random.default_rng(3)
         probes = certify.sample_surface(positions, indices, 1500, seed=2)
         probes = probes + rng.normal(scale=spread, size=probes.shape)
-        by_grid = certify._nearest_by_grid(probes, corners)
-        by_scan = np.sqrt(certify._nearest_among(probes, corners))
+        by_grid = np.sqrt(certify._nearest_by_grid(probes, corners)[0])
+        by_scan = np.sqrt(certify._nearest_among(probes, corners)[0])
         assert np.array_equal(by_grid, by_scan)
 
     def test_one_huge_triangle_among_small_ones_does_not_break_it(self):
@@ -284,8 +284,8 @@ class TestTheGridGivesTheSameAnswerAsTheScan:
         rng = np.random.default_rng(7)
         probes = rng.normal(size=(1200, 3)) * 3.0
         assert np.array_equal(
-            certify._nearest_by_grid(probes, corners),
-            np.sqrt(certify._nearest_among(probes, corners)),
+            np.sqrt(certify._nearest_by_grid(probes, corners)[0]),
+            np.sqrt(certify._nearest_among(probes, corners)[0]),
         )
 
     @pytest.mark.parametrize(
@@ -307,7 +307,9 @@ class TestTheGridGivesTheSameAnswerAsTheScan:
     def test_a_mesh_of_one_triangle_is_still_a_grid(self):
         probes = np.asarray([(0.25, 0.25, 2.0), (5.0, 0.0, 0.0), (-1.0, 0.5, 0.0)])
         corners = _TRIANGLE[0][_TRIANGLE[1].reshape(-1, 3)]
-        assert certify._nearest_by_grid(probes, corners) == pytest.approx([2.0, 4.0, 1.0])
+        assert np.sqrt(certify._nearest_by_grid(probes, corners)[0]) == pytest.approx(
+            [2.0, 4.0, 1.0]
+        )
 
 
 class TestWhenToStopSearchingAndJustScan:
@@ -351,5 +353,72 @@ class TestWhenToStopSearchingAndJustScan:
 
         through_the_grid = certify.distance_to_mesh(points, positions, indices)
         corners = np.asarray(positions, dtype='d')[np.asarray(indices).reshape(-1, 3)]
-        by_hand = np.sqrt(certify._nearest_among(np.asarray(points, dtype='d'), corners))
+        by_hand = np.sqrt(certify._nearest_among(np.asarray(points, dtype='d'), corners)[0])
         assert np.allclose(through_the_grid, by_hand, atol=1e-9)
+
+
+class TestWhichTriangleIsUnderAPoint:
+    """Not just how far the surface is, but which piece of it, and where on it.
+
+    A measurement only needs the distance. Anything that wants to read what the
+    reference *carries* at that place -- a bake copying a texture onto a
+    reduced mesh, a lookup of any attribute at all -- needs the triangle and the
+    point on it, because that is what barycentric coordinates are taken from.
+    It is the same search either way, so it is the same search.
+    """
+
+    def test_a_point_on_a_triangle_finds_that_triangle(self):
+        positions = np.asarray(
+            [(0, 0, 0), (1, 0, 0), (0, 1, 0), (2, 0, 0), (2, 1, 0), (1, 1, 0)], dtype='d'
+        )
+        indices = np.asarray([0, 1, 2, 3, 4, 5], dtype=np.uint32)
+        inside_first = np.asarray([[0.2, 0.2, 0.0]])
+        triangle, closest = certify.nearest_triangle(inside_first, positions, indices)
+        assert triangle.tolist() == [0]
+        assert np.allclose(closest, inside_first)
+
+    def test_a_point_above_a_triangle_lands_on_it(self):
+        positions = np.asarray([(0, 0, 0), (1, 0, 0), (0, 1, 0)], dtype='d')
+        indices = np.asarray([0, 1, 2], dtype=np.uint32)
+        triangle, closest = certify.nearest_triangle(
+            np.asarray([[0.25, 0.25, 5.0]]), positions, indices
+        )
+        assert triangle.tolist() == [0]
+        assert np.allclose(closest, [[0.25, 0.25, 0.0]])
+
+    def test_it_agrees_with_the_distance_the_other_call_reports(self):
+        """The two answers come from one search, so they cannot disagree."""
+        rng = np.random.default_rng(11)
+        positions, indices = shapes.icosphere(3)
+        points = rng.normal(scale=1.4, size=(500, 3))
+        far = certify.distance_to_mesh(points, positions, indices)
+        _, closest = certify.nearest_triangle(points, positions, indices)
+        assert np.allclose(np.linalg.norm(points - closest, axis=1), far, atol=1e-9)
+
+    def test_it_agrees_when_the_mesh_is_big_enough_to_need_the_grid(self):
+        """The blocked scan and the grid are different code; both are asked."""
+        rng = np.random.default_rng(12)
+        positions, indices = shapes.icosphere(5)
+        points = rng.normal(scale=1.2, size=(400, 3))
+        far = certify.distance_to_mesh(points, positions, indices)
+        _, closest = certify.nearest_triangle(points, positions, indices)
+        assert len(np.asarray(indices)) // 3 > 4000
+        assert np.allclose(np.linalg.norm(points - closest, axis=1), far, atol=1e-9)
+
+    def test_the_named_triangle_is_the_one_the_point_landed_on(self):
+        rng = np.random.default_rng(13)
+        positions, indices = shapes.icosphere(3)
+        points = rng.normal(scale=1.4, size=(200, 3))
+        triangle, closest = certify.nearest_triangle(points, positions, indices)
+        corners = np.asarray(positions, dtype='d')[np.asarray(indices).reshape(-1, 3)]
+        on = corners[triangle]
+        # The landing point is in the plane of the triangle it names.
+        normal = np.cross(on[:, 1] - on[:, 0], on[:, 2] - on[:, 0])
+        normal /= np.linalg.norm(normal, axis=1)[:, None]
+        assert np.allclose(np.einsum('ij,ij->i', closest - on[:, 0], normal), 0.0, atol=1e-9)
+
+    def test_an_empty_mesh_names_no_triangle(self):
+        triangle, _ = certify.nearest_triangle(
+            np.zeros((3, 3)), np.zeros((0, 3)), np.zeros((0,), dtype=np.uint32)
+        )
+        assert triangle.tolist() == [-1, -1, -1]

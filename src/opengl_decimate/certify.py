@@ -26,7 +26,13 @@ import numpy as np
 from opengl_decimate.spatial import CellGrid, shell, shell_size
 from opengl_decimate.types import FloatArray, IndexArray
 
-__all__ = ['Deviation', 'distance_to_mesh', 'sample_surface', 'surface_deviation']
+__all__ = [
+    'Deviation',
+    'distance_to_mesh',
+    'nearest_triangle',
+    'sample_surface',
+    'surface_deviation',
+]
 
 #: Most points compared against triangles at once. The distance is exact
 #: whatever this is; it only decides how much memory the measurement asks for.
@@ -93,14 +99,44 @@ def distance_to_mesh(points: FloatArray, positions: FloatArray, indices: IndexAr
     faces = np.asarray(indices).reshape(-1, 3)
     if not len(faces) or not len(points):
         return np.full(len(points), np.inf)
+    return np.sqrt(_nearest(points, np.asarray(positions, dtype='d')[faces])[0])
 
+
+def nearest_triangle(
+    points: FloatArray, positions: FloatArray, indices: IndexArray
+) -> tuple[IndexArray, FloatArray]:
+    """Which triangle is nearest each point, and the point on it.
+
+    Returns ``(triangle, closest)``: an index into the triangle list, and where
+    on that triangle the query landed. A measurement wants only the distance,
+    which :func:`distance_to_mesh` gives; anything that wants to read what the
+    reference *carries* there wants this, because the landing point is what
+    barycentric coordinates are taken from and those are what every attribute
+    is interpolated with. Copying a texture from a dense mesh onto a reduced one
+    is the case this exists for.
+
+    It is the same search as the distance, so it is the same code: the grid,
+    the widening, and the scan where scanning is cheaper. An empty mesh names
+    ``-1`` and leaves the landing points where the queries were.
+    """
+    points = np.asarray(points, dtype='d')
+    faces = np.asarray(indices).reshape(-1, 3)
+    if not len(faces) or not len(points):
+        return np.full(len(points), -1, dtype=np.int64), points.copy()
     corners = np.asarray(positions, dtype='d')[faces]
+    _, winner = _nearest(points, corners)
+    landed = _closest(points, corners[winner, 0], corners[winner, 1], corners[winner, 2])
+    return winner, landed
+
+
+def _nearest(points: FloatArray, corners: FloatArray) -> tuple[FloatArray, IndexArray]:
+    """Squared distance to the nearest triangle, and which one it was."""
     if len(points) * len(corners) <= _SCAN_PAIRS:
-        return np.sqrt(_nearest_among(points, corners))
+        return _nearest_among(points, corners)
     return _nearest_by_grid(points, corners)
 
 
-def _nearest_among(points: FloatArray, corners: FloatArray) -> FloatArray:
+def _nearest_among(points: FloatArray, corners: FloatArray) -> tuple[FloatArray, IndexArray]:
     """Squared distance from every point to the nearest of every triangle.
 
     Blocked both ways. Every point is tested against every triangle, so the work
@@ -108,25 +144,29 @@ def _nearest_among(points: FloatArray, corners: FloatArray) -> FloatArray:
     is what gets divided up rather than one side of it. A 1.5M-triangle mesh
     against 256 points at a time is nine gigabytes of temporaries for a single
     block, which is not a slow measurement but a dead process.
+
+    The winning triangle is carried alongside the distance because finding it
+    again afterwards would mean searching twice.
     """
     points_at_once = min(BLOCK, len(points))
     pairs = max(1, BLOCK_BYTES // (_PER_PAIR * 8))
     triangles_at_once = max(1, min(len(corners), pairs // points_at_once))
 
     best = np.full(len(points), np.inf)
+    winner = np.zeros(len(points), dtype=np.int64)
     for start in range(0, len(points), points_at_once):
         block = points[start : start + points_at_once]
-        nearest = np.full(len(block), np.inf)
+        stop = start + len(block)
         for first in range(0, len(corners), triangles_at_once):
             some = corners[first : first + triangles_at_once]
             offsets = _closest_on_triangles(block, some) - block[:, None, :]
-            np.minimum(
-                nearest,
-                np.min(np.einsum('ijk,ijk->ij', offsets, offsets), axis=1),
-                out=nearest,
-            )
-        best[start : start + points_at_once] = nearest
-    return best
+            apart = np.einsum('ijk,ijk->ij', offsets, offsets)
+            here = np.argmin(apart, axis=1)
+            found = apart[np.arange(len(block)), here]
+            better = found < best[start:stop]
+            best[start:stop] = np.where(better, found, best[start:stop])
+            winner[start:stop] = np.where(better, first + here, winner[start:stop])
+    return best, winner
 
 
 def _grid_side(low: FloatArray, high: FloatArray) -> float:
@@ -181,7 +221,7 @@ def scan_is_cheaper(ring_cells: int, per_cell: float, triangles: int) -> bool:
     return not per_cell or ring_cells * per_cell >= triangles
 
 
-def _nearest_by_grid(points: FloatArray, corners: FloatArray) -> FloatArray:
+def _nearest_by_grid(points: FloatArray, corners: FloatArray) -> tuple[FloatArray, IndexArray]:
     """Distance from each point to the nearest triangle, through a uniform grid.
 
     A triangle is registered in every cell its bounding box covers. So every
@@ -204,6 +244,7 @@ def _nearest_by_grid(points: FloatArray, corners: FloatArray) -> FloatArray:
 
     at = np.floor(points / side).astype(np.int64)
     best = np.full(len(points), np.inf)
+    winner = np.zeros(len(points), dtype=np.int64)
     pending = np.arange(len(points), dtype=np.int64)
     # What one cell of the ring is worth asking for, averaged over the grid.
     per_cell = len(cells) / grid.occupied if grid.occupied else 0.0
@@ -229,12 +270,31 @@ def _nearest_by_grid(points: FloatArray, corners: FloatArray) -> FloatArray:
                 opens[1:] = asking[1:] != asking[:-1]
                 starts = np.flatnonzero(opens)
                 each = pending[asking[starts]]
-                best[each] = np.minimum(best[each], np.minimum.reduceat(found, starts))
+                closest = np.minimum.reduceat(found, starts)
+                # Which entry of the run was the closest, so the triangle that
+                # won can be named. The first of a tie will do: they are the
+                # same distance, which is what the answer is about.
+                sizes = np.diff(np.append(starts, len(found)))
+                at_best = np.flatnonzero(found == np.repeat(closest, sizes))
+                first_best = np.minimum.reduceat(
+                    np.where(
+                        np.isin(np.arange(len(found)), at_best),
+                        np.arange(len(found)),
+                        len(found),
+                    ),
+                    starts,
+                )
+                better = closest < best[each]
+                winner[each] = np.where(better, owner[entry[first_best]], winner[each])
+                best[each] = np.where(better, closest, best[each])
         pending = pending[best[pending] > (radius * side) ** 2]
         radius += 1
     if len(pending):
-        best[pending] = np.minimum(best[pending], _nearest_among(points[pending], corners))
-    return np.sqrt(best)
+        scanned, chose = _nearest_among(points[pending], corners)
+        better = scanned < best[pending]
+        winner[pending] = np.where(better, chose, winner[pending])
+        best[pending] = np.where(better, scanned, best[pending])
+    return best, winner
 
 
 def _paired_distances(points: FloatArray, corners: FloatArray) -> FloatArray:

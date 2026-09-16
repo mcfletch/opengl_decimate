@@ -156,6 +156,15 @@ How far two surfaces are from each other, measured in both directions.
 to cover — and `Deviation.rms` is the root-mean-square over the samples. Raising
 `samples` tightens the worst case; the root-mean-square settles quickly.
 
+### `nearest_triangle(points, positions, indices) -> (triangle, closest)`
+
+Which triangle of the mesh is nearest each point, and where on it the query
+landed. The same search the distance uses, reporting what it found rather than
+only how far it was — which is what reading an attribute off the reference
+needs, since the landing point is where barycentric coordinates come from.
+`-1` for an empty mesh. A bake copying a texture from a dense mesh onto a
+reduced one is the case it exists for.
+
 ### `distance_to_mesh(points, positions, indices) -> ndarray`
 
 Exact distance from each point to the nearest triangle: the closest point of a
