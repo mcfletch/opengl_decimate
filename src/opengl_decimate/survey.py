@@ -13,12 +13,15 @@ condition preserves topology by construction, which is what it is for. A scan of
 feathers or lace arrives with hundreds and each costs the triangles it takes to
 go round it.
 
-**The atlas.** A texture coordinate means something only inside one chart -- one
-connected piece of surface that was unwrapped as one -- so a triangle covering
-more surface than a chart holds has no coordinate that fits it, and what gets
-drawn is a smear of whatever the atlas holds nearby. ``charts`` counts them and
-``texture_floor`` is the triangle count that implies. ``seam_share`` is the same
-property seen from the edges, and says what ``lock_seams`` would cost.
+**The atlas.** An unwrap cuts the surface into charts and lays them flat on the
+image, duplicating the vertices along each cut -- so every vertex belongs to
+exactly one chart, and a triangle samples the part of the image it is sitting on
+only while all three of its corners are in the same one. A contraction across a
+cut leaves a triangle whose three coordinates point at three unrelated places in
+the atlas, and what it draws is the stripe between them. How soon that starts
+happening is set by how finely the model was cut: ``charts`` counts the pieces
+and ``texture_floor`` is the triangle count they imply. ``seam_share`` is the
+same property seen from the edges, and says what ``lock_seams`` would cost.
 
 :func:`survey` measures all three and puts a floor on what any reduction can
 reach. A caller who finds that floor near the triangle count they started with
@@ -90,12 +93,14 @@ class Survey:
 
     @property
     def texture_floor(self) -> int:
-        """Below this many triangles the model's texture stops describing it.
+        """Below this many triangles the model starts sampling across its atlas.
 
-        A texture coordinate means something only inside one chart, so a
-        triangle covering more surface than a chart holds has no coordinate that
-        fits it -- the reduction still works, and what it draws is a smear of
-        whatever the atlas happens to hold nearby.
+        A triangle samples the part of the image it sits on only while all three
+        of its corners are in one chart. Once an output triangle is larger than
+        a chart it cannot keep them there, and its three coordinates point at
+        three unrelated places in the atlas -- what it draws is the stripe
+        between them. The reduction is unharmed and so is the silhouette; the
+        unwrap is what has run out.
 
         The estimate is the triangle count at which one output triangle grows to
         the size of a chart in the *smaller quarter* of them: past that, a

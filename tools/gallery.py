@@ -119,6 +119,11 @@ class Subject:
     #: enough that the alternative is a level whose texture has stopped
     #: describing it. Costs the triangles the seam network needs.
     lock_seams: bool = False
+    #: Stop the ladder here rather than at the bottom of the chain, for a
+    #: subject whose triangles start spanning its atlas islands first -- see
+    #: `survey`'s texture floor. Drawing the levels below it would be publishing
+    #: a picture of the model's unwrap, which the reduction cannot help.
+    stop_below: int = 0
 
 
 SUBJECTS = (
@@ -136,6 +141,44 @@ SUBJECTS = (
             'first million triangles on and no symmetry to exploit: what the '
             'reduction keeps is silhouette.'
         ),
+    ),
+    Subject(
+        slug='ruffs',
+        title='Lekking ruffs',
+        source='tmp/lekking_ruffs.glb',
+        credit=(
+            "'Lekking ruffs', inventory MP 045, from the Krystyna and Włodzimierz Tomek "
+            'Natural Science Museum in Ciężkowice, Poland. Digitised by the Regional '
+            'Digitalisation Lab, Małopolska Institute of Culture in Kraków, for the '
+            '[Virtual Museums of Małopolska]'
+            '(https://muzea.malopolska.pl/en/objects-list/2250) project, CC0'
+        ),
+        rotation=135.0,
+        note=(
+            'A museum scan exported as twenty-five primitives, each stopping at the '
+            '65,535 vertices a 16-bit index can name -- so the reduction sees one '
+            'surface only because the primitives are merged and welded first. Nine '
+            'of its thirteen components are specks the photogrammetry left behind, '
+            'and `drop_components_below` takes them: 572 triangles.\n\n'
+            'The chain stops at 32,000 for a reason that belongs to the unwrap '
+            'rather than to the reduction. An unwrap cuts the surface into islands '
+            'and lays them flat on the image, duplicating the vertices along each '
+            'cut -- so every vertex belongs to exactly one island, and a triangle '
+            'samples the right part of the image only while all three of its corners '
+            'are in the same one. A contraction across a cut leaves a triangle whose '
+            'three coordinates point at three unrelated places in the atlas, and what '
+            'it draws is the stripe between them.\n\n'
+            'This model is cut into 2,549 islands of 88 triangles apiece, so there is '
+            'very little room before a triangle is bigger than an island. Counted: '
+            '17% of its triangles span more than one island at 32,000, 58% at 8,000 '
+            'and 80% at 4,000 -- against 2% for the coastal cliff at 8,000 and 0.04% '
+            'for the marble bust. What the birds wear below 32,000 is the ground they '
+            'are standing on, because that is what is laid out next to them in the '
+            'image. The geometry is unharmed and no option here helps: the fix is a '
+            'coarser unwrap, which is a modelling job.'
+        ),
+        drop_components_below=0.01,
+        stop_below=32_000,
     ),
     Subject(
         slug='rocks',
@@ -377,7 +420,7 @@ def load(path: str) -> tuple[list, int]:
     return grouped, sum(1 for _ in shapes(scene.group))
 
 
-def ladder(triangles: int) -> list:
+def ladder(triangles: int, stop_below: int = 0) -> list:
     """``(triangles, note)`` for each level, the source first.
 
     A fixed chain rather than a share of the source, because what a renderer can
@@ -389,12 +432,21 @@ def ladder(triangles: int) -> list:
     would ship -- past the top of the chain a renderer with a world to draw is
     not spending the triangles on one prop -- but it is the picture the rest are
     judged against.
+
+    ``stop_below`` ends the ladder early, for a subject whose triangles start
+    sampling across its atlas above the bottom of the chain. The reduction still
+    produces those levels and their silhouettes are right; what is wrong with
+    them is the unwrap they inherited, and a page of those is a picture of the
+    model rather than of the reducer.
     """
     levels = [(triangles, 'the source, for reference')]
-    levels += [(count, '') for count in LEVELS if count < triangles]
+    levels += [(count, '') for count in LEVELS if count < triangles and count >= stop_below]
     if len(levels) > 1:
         levels[1] = (levels[1][0], 'the finest a game would ship')
-        levels[-1] = (levels[-1][0], 'past here, an imposter')
+        levels[-1] = (
+            levels[-1][0],
+            'the last its texture describes' if stop_below else 'past here, an imposter',
+        )
     return levels
 
 
@@ -483,7 +535,7 @@ def reduce_subject(subject: Subject, certify: bool) -> Reduction:
     out.charts, out.texture_floor = read.charts, read.texture_floor
     out.seen_radius = view_radius(whole, centre, math.radians(subject.rotation))
 
-    for index, (count, note) in enumerate(ladder(source_triangles)):
+    for index, (count, note) in enumerate(ladder(source_triangles, subject.stop_below)):
         start = time.perf_counter()
         # Every level below the source gets the normals of the surface it
         # actually is -- see ``recompute_normals``, which is what keeps a coarse
@@ -1017,11 +1069,18 @@ def page(reductions: list, described: str) -> str:
 def where_it_stopped(reduction: Reduction) -> str:
     """How far down the ladder a subject actually got.
 
-    Three answers. It reached the last rung; it ran out of contractions part
-    way, which is the ``floor``; or it produced a level for every rung and not
-    one of them was the count that rung asked for -- which is the answer a
-    canopy of leaf cards gives, and reads as success unless it is said.
+    Four answers. Its ladder was stopped early on purpose, because its triangles
+    start spanning its atlas islands above the bottom of the chain; it reached
+    the last rung; it ran out of contractions part way, which is the ``floor``;
+    or it produced a level
+    for every rung and not one of them was the count that rung asked for --
+    which is the answer a canopy of leaf cards gives, and reads as success
+    unless it is said.
     """
+    if reduction.subject.stop_below:
+        return '%s tri, past which it samples across its atlas' % (
+            f'{reduction.subject.stop_below:,}',
+        )
     if reduction.floor:
         return '%s tri' % (f'{reduction.floor:,}',)
     reached = reduction.levels[-1].triangles
@@ -1066,11 +1125,11 @@ def closing(reductions: list) -> list:
         ' property of how the model was unwrapped rather than of the reducer: no'
         ' option here moves it, and re-cutting the atlas is what does.'
         ' How visible that is depends on how much of the model the small charts cover: an atlas of a few large charts and a handful of small ones loses only the handful, which is why the cliff and the rocks still read below the floor quoted for them. An atlas whose charts are *uniformly* small has nowhere to hide, and that is the case worth measuring for.'
-        '\n\nA museum scan of lekking ruffs was a subject on this page until'
-        ' its atlas was measured: 405,540 triangles across 2,549 charts, a'
-        ' median of 88 triangles each, which puts its floor at 15,020. It draws'
-        ' correctly at 32,000 and wears the ground texture at 8,000, and no'
-        ' chain a game would ship fits in between.',
+        '\n\nThe lekking ruffs is the subject on this page that runs into it:'
+        ' 405,540 triangles across 2,549 charts, a median of 88 triangles each,'
+        ' which puts its floor at 15,020. Its ladder stops at 32,000 for that'
+        ' reason and not for any the reduction has -- at 8,000 the geometry is'
+        ' still a fair bird and the texture on it is the ground.',
         '',
     ]
     out += [

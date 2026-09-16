@@ -40,7 +40,7 @@ find the seams and the charts of the atlas; nothing else the mesh carries is.
 | `charts` | `int` | pieces the texture atlas is cut into; 0 for a mesh carrying no texture coordinates |
 | `median_chart` | `int` | triangles in the middle chart |
 | `small_chart` | `int` | triangles in the smaller quarter of them |
-| `texture_floor` | `int` | below this many triangles the texture stops describing the model: one output triangle grows to the size of a chart in the smaller quarter, so a quarter of the surface is being drawn from charts too small to fit it. An estimate, and a property of how the model was unwrapped rather than of the reduction |
+| `texture_floor` | `int` | below this many triangles the model starts sampling across its atlas. A triangle samples the right part of the image only while all three corners are in one chart; once it is larger than a chart its coordinates point at three unrelated places and it draws the stripe between them. Estimated from the smaller quarter of the charts, so it is conservative where a few small charts sit among large ones — compare it with `median_chart` |
 | `floor` | `int` | the fewest triangles any reduction can reach: one per open piece, four per closed one. A lower bound from the pieces alone; handles and seams push the real floor above it |
 | `reducible` | `float` | the share of the triangles a reduction could in principle remove. One for a model nothing stops, near zero for a canopy of leaf cards |
 
