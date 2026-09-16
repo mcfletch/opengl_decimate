@@ -250,6 +250,11 @@ class Reduction:
     #: Where the reduction ran out of legal contractions, if it did before the
     #: ladder did.
     floor: int = 0
+    #: What the camera has to frame, from where it stands -- see
+    #: :func:`view_radius`. ``radius`` is the bounding sphere, which is what a
+    #: level of detail's distances are measured in and what the framing of a
+    #: slab gets wrong.
+    seen_radius: float = 1.0
     #: Connected pieces the welded source is in, handles through them, and the
     #: share of its edges an atlas seam holds -- see :func:`shape_of`. Between
     #: them they say where a floor comes from.
@@ -310,6 +315,26 @@ def shape_of(groups: list) -> tuple[int, int, float]:
         held += int(np.count_nonzero(copies[edges[:, 0]] != copies[edges[:, 1]]))
         total += len(edges)
     return pieces, handles, (held / total if total else 0.0)
+
+
+def view_radius(positions: Any, centre: Any, yaw: float) -> float:
+    """The radius of the model as the camera sees it, not as a sphere sees it.
+
+    Auto-framing works from the bounding sphere, which is the right answer for a
+    compact subject and the wrong one for a slab: the coastal cliff is 87 units
+    long, 11 high and 24 deep, so its sphere has a radius of 45 and a camera
+    placed for that draws the 24-by-11 face it is looking at very small in the
+    middle of an empty frame.
+
+    So the model is projected onto the camera's own plane and the radius taken
+    there. It is the distance a frame has to hold, which is what framing wants
+    to know.
+    """
+    at = np.asarray(positions, dtype='d') - np.asarray(centre, dtype='d')
+    # The camera looks along -Z rotated by `yaw` about Y, so the plane it frames
+    # is spanned by the rotated X axis and by Y.
+    across = at[:, 0] * math.cos(yaw) - at[:, 2] * math.sin(yaw)
+    return float(np.max(np.hypot(across, at[:, 1]))) or 1.0
 
 
 def peak_rss_mb() -> float:
@@ -475,6 +500,7 @@ def reduce_subject(subject: Subject, certify: bool) -> Reduction:
         groups=groups,
     )
     out.pieces, out.handles, out.seam_share = shape_of(groups)
+    out.seen_radius = view_radius(whole, centre, math.radians(subject.rotation))
 
     for index, (count, note) in enumerate(ladder(source_triangles)):
         start = time.perf_counter()
@@ -603,13 +629,20 @@ def write_level(reduction: Reduction, level: Level, where: str) -> str:
     return path
 
 
-def capture(model: str, png: str, yaw: float, margin: float, size: int) -> bool:
+def capture(
+    model: str, png: str, yaw: float, margin: float, size: int, elevation: float = 0.22
+) -> bool:
     """Draw a level the way the engine draws it: materials, textures and all.
 
     Through ``oglc-view`` rather than the bare probe, because what this row of
     the gallery answers is *what does it look like* -- and the answer to that
     involves the material as much as the geometry. The probe's flat shading is
     the other row, where the triangles are the subject.
+
+    ``elevation`` is how far above the centre the camera stands, as a fraction
+    of the model's bounding-sphere radius. A slab's sphere is much larger than
+    the face being looked at, so a caller framing on what it can *see* has to
+    scale this to match or the subject sits on the floor of the picture.
     """
     run = subprocess.run(
         [
@@ -625,6 +658,8 @@ def capture(model: str, png: str, yaw: float, margin: float, size: int) -> bool:
             '%g' % (yaw,),
             '--margin',
             '%g' % (margin,),
+            '--elevation',
+            '%g' % (elevation,),
             '--no-rotate',
             '--no-cameras',
             '--no-shadows',
@@ -753,19 +788,26 @@ def render_subject(reduction: Reduction, probe: Any, models: str) -> None:
         # the answer rather than an accident of framing.
         for key, where in (('shaded', NEAREST), ('served', level.shown_at)):
             png = '%s-%s.png' % (name, key)
+            # Close up is framed on what the camera can see, so a slab fills the
+            # frame like anything else. Where it is *used* is a distance the
+            # level of detail chose, in the bounding-sphere radii those
+            # distances are always measured in, so that one is left alone.
+            closer = reduction.seen_radius / reduction.radius
+            fit = (1.0 + NEAREST) * closer if key == 'shaded' else (1.0 + where)
             if capture(
                 model,
                 os.path.join(PICTURES, png),
                 math.radians(subject.rotation),
-                (1.0 + where) / FIT,
+                fit / FIT,
                 CELL,
+                elevation=0.22 * (closer if key == 'shaded' else 1.0),
             ):
                 level.images[key] = png
 
         # And the same level's triangles, close up and flat, whatever distance
         # it is used at -- which is the point of putting them side by side.
         positions, normals, indices = merged_level(level)
-        close = (1.0 + NEAREST) * reduction.radius
+        close = (1.0 + NEAREST) * reduction.seen_radius
         image = probe.render(
             positions,
             normals,

@@ -6,14 +6,13 @@ Every picture and every number on this page is written by [`tools/gallery.py`](.
 tools/gallery.py
 ```
 
-Measured on <GLDescription Radeon 8060S Graphics (radeonsi, gfx1151, LLVM 20.1.2, DRM 3.64, 7.0.0-31-generic), 4.6 (Compatibility Profile) Mesa 25.2.8-0ubuntu0.24.04.2 (hardware)>. Reducing every subject took 16.9 GB of resident memory at its highest, against 2,085,320 triangles of island tree -- the loaded model, its textures and the recorded sequence together.
+Measured on <GLDescription Radeon 8060S Graphics (radeonsi, gfx1151, LLVM 20.1.2, DRM 3.64, 7.0.0-31-generic), 4.6 (Compatibility Profile) Mesa 25.2.8-0ubuntu0.24.04.2 (hardware)>. Reducing every subject took 16.9 GB of resident memory at its highest, against 1,537,926 triangles of coastal cliff -- the loaded model, its textures and the recorded sequence together.
 
 Every subject is **CC0**. Credit is given because the work was given away.
 
 - 'Coastal Cliff 04' by Rob Tuytel and Rico Cilliers, from [Poly Haven](https://polyhaven.com/a/coastal_cliff_04), CC0
 - 'Lekking ruffs', inventory MP 045, from the Krystyna and Włodzimierz Tomek Natural Science Museum in Ciężkowice, Poland. Digitised by the Regional Digitalisation Lab, Małopolska Institute of Culture in Kraków, for the [Virtual Museums of Małopolska](https://muzea.malopolska.pl/en/objects-list/2250) project, CC0
 - 'Coast Land Rocks 02' by Rob Tuytel and Rico Cilliers, from [Poly Haven](https://polyhaven.com/a/coast_land_rocks_02), CC0
-- 'Island Tree 03' by Rob Tuytel and Rico Cilliers, from [Poly Haven](https://polyhaven.com/a/island_tree_03), CC0
 - 'Marble Bust 01' by Rico Cilliers, from [Poly Haven](https://polyhaven.com/a/marble_bust_01), CC0
 
 ## How to read it
@@ -43,53 +42,59 @@ A photogrammetry scan of rock. There is no flat region to spend the first millio
 |---|---|
 | Source | 1,537,926 triangles, 789,032 vertices, 1 primitive over 1 material |
 | Welded to | 771,255 points |
-| Reduced in | 11.1 s, 771,249 contractions |
+| Reduced in | 11.3 s, 771,249 contractions |
 | Credit | 'Coastal Cliff 04' by Rob Tuytel and Rico Cilliers, from [Poly Haven](https://polyhaven.com/a/coastal_cliff_04), CC0 |
 
 | Triangles | Of source | `result.error` | Measured | Replay | Draw | Frame rate | One pixel past | Outline | Shading |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1,537,926 *(the source, for reference)* | source | 0.00000 | -- | 2253 ms | 0.20 ms | 5,080 | -- | -- | -- |
-| 32,000 *(the finest a game would ship)* | 2.1% | 0.04059 | 0.10510 | 87 ms | 0.04 ms | 25,073 | 0.0 r | 0.62% | 68.5% |
-| 8,000 | 0.52% | 0.10042 | 0.21058 | 54 ms | 0.04 ms | 27,283 | 0.4 r | 1.37% | 75.1% |
-| 4,000 | 0.26% | 0.15330 | 0.48983 | 49 ms | 0.04 ms | 27,883 | 2.4 r | 1.93% | 76.3% |
-| 2,000 | 0.13% | 0.23028 | 0.68114 | 47 ms | 0.04 ms | 27,098 | 3.7 r | 3.23% | 76.3% |
-| 999 | 0.06% | 0.34224 | 1.19127 | 46 ms | 0.04 ms | 26,583 | 7.2 r | 8.85% | 73.5% |
-| 500 *(past here, an imposter)* | 0.03% | 0.49727 | 1.82888 | 44 ms | 0.04 ms | 25,972 | 11.6 r | 10.00% | 84.0% |
+| 1,537,926 *(the source, for reference)* | source | 0.00000 | -- | 2241 ms | 0.19 ms | 5,133 | -- | -- | -- |
+| 32,000 *(the finest a game would ship)* | 2.1% | 0.04059 | 0.10510 | 117 ms | 0.04 ms | 25,975 | 0.0 r | 0.62% | 60.7% |
+| 8,000 | 0.52% | 0.10042 | 0.21058 | 68 ms | 0.04 ms | 24,662 | 0.4 r | 1.37% | 68.6% |
+| 4,000 | 0.26% | 0.15330 | 0.48983 | 56 ms | 0.04 ms | 27,488 | 2.4 r | 1.93% | 72.1% |
+| 2,000 | 0.13% | 0.23028 | 0.68114 | 52 ms | 0.04 ms | 23,887 | 3.7 r | 3.23% | 74.9% |
+| 999 | 0.06% | 0.34224 | 1.19127 | 48 ms | 0.04 ms | 25,573 | 7.2 r | 8.85% | 72.6% |
+| 500 *(past here, an imposter)* | 0.03% | 0.49727 | 1.82888 | 47 ms | 0.04 ms | 27,740 | 11.6 r | 10.00% | 70.0% |
 
 <table>
 <tr><th align="left">Level</th><th align="left">Close up</th><th align="left">Where it is used</th><th align="left">Its triangles</th></tr>
 <tr><td valign="top" width="140"><b>1,537,926</b> tri<br><sub><b>the source, for reference</b><br>the source, drawn where the finest level is</sub></td><td><img src="gallery/cliff-l0-shaded.png" width="250" alt="Coastal cliff at 1,537,926 triangles"></td><td><img src="gallery/cliff-l0-served.png" width="250" alt="Coastal cliff at 1,537,926 triangles, 0.2 radii away"></td><td><img src="gallery/cliff-l0-edges.png" width="250" alt="1,537,926 triangles of Coastal cliff"></td></tr>
-<tr><td valign="top" width="140"><b>32,000</b> tri<br><sub><b>the finest a game would ship</b><br>one pixel of error past <b>0.0 radii</b><br>drawn there; outline 0.62%, shading 68.5%</sub></td><td><img src="gallery/cliff-l1-shaded.png" width="250" alt="Coastal cliff at 32,000 triangles"></td><td><img src="gallery/cliff-l1-served.png" width="250" alt="Coastal cliff at 32,000 triangles, 0.2 radii away"></td><td><img src="gallery/cliff-l1-edges.png" width="250" alt="32,000 triangles of Coastal cliff"></td></tr>
-<tr><td valign="top" width="140"><b>8,000</b> tri<br><sub>one pixel of error past <b>0.4 radii</b><br>drawn there; outline 1.37%, shading 75.1%</sub></td><td><img src="gallery/cliff-l2-shaded.png" width="250" alt="Coastal cliff at 8,000 triangles"></td><td><img src="gallery/cliff-l2-served.png" width="250" alt="Coastal cliff at 8,000 triangles, 0.4 radii away"></td><td><img src="gallery/cliff-l2-edges.png" width="250" alt="8,000 triangles of Coastal cliff"></td></tr>
-<tr><td valign="top" width="140"><b>4,000</b> tri<br><sub>one pixel of error past <b>2.4 radii</b><br>drawn there; outline 1.93%, shading 76.3%</sub></td><td><img src="gallery/cliff-l3-shaded.png" width="250" alt="Coastal cliff at 4,000 triangles"></td><td><img src="gallery/cliff-l3-served.png" width="250" alt="Coastal cliff at 4,000 triangles, 2.4 radii away"></td><td><img src="gallery/cliff-l3-edges.png" width="250" alt="4,000 triangles of Coastal cliff"></td></tr>
-<tr><td valign="top" width="140"><b>2,000</b> tri<br><sub>one pixel of error past <b>3.7 radii</b><br>drawn there; outline 3.23%, shading 76.3%</sub></td><td><img src="gallery/cliff-l4-shaded.png" width="250" alt="Coastal cliff at 2,000 triangles"></td><td><img src="gallery/cliff-l4-served.png" width="250" alt="Coastal cliff at 2,000 triangles, 3.7 radii away"></td><td><img src="gallery/cliff-l4-edges.png" width="250" alt="2,000 triangles of Coastal cliff"></td></tr>
-<tr><td valign="top" width="140"><b>999</b> tri<br><sub>one pixel of error past <b>7.2 radii</b><br>drawn there; outline 8.85%, shading 73.5%</sub></td><td><img src="gallery/cliff-l5-shaded.png" width="250" alt="Coastal cliff at 999 triangles"></td><td><img src="gallery/cliff-l5-served.png" width="250" alt="Coastal cliff at 999 triangles, 7.2 radii away"></td><td><img src="gallery/cliff-l5-edges.png" width="250" alt="999 triangles of Coastal cliff"></td></tr>
-<tr><td valign="top" width="140"><b>500</b> tri<br><sub><b>past here, an imposter</b><br>one pixel of error past <b>11.6 radii</b><br>drawn there; outline 10.00%, shading 84.0%</sub></td><td><img src="gallery/cliff-l6-shaded.png" width="250" alt="Coastal cliff at 500 triangles"></td><td><img src="gallery/cliff-l6-served.png" width="250" alt="Coastal cliff at 500 triangles, 11.6 radii away"></td><td><img src="gallery/cliff-l6-edges.png" width="250" alt="500 triangles of Coastal cliff"></td></tr>
+<tr><td valign="top" width="140"><b>32,000</b> tri<br><sub><b>the finest a game would ship</b><br>one pixel of error past <b>0.0 radii</b><br>drawn there; outline 0.62%, shading 60.7%</sub></td><td><img src="gallery/cliff-l1-shaded.png" width="250" alt="Coastal cliff at 32,000 triangles"></td><td><img src="gallery/cliff-l1-served.png" width="250" alt="Coastal cliff at 32,000 triangles, 0.2 radii away"></td><td><img src="gallery/cliff-l1-edges.png" width="250" alt="32,000 triangles of Coastal cliff"></td></tr>
+<tr><td valign="top" width="140"><b>8,000</b> tri<br><sub>one pixel of error past <b>0.4 radii</b><br>drawn there; outline 1.37%, shading 68.6%</sub></td><td><img src="gallery/cliff-l2-shaded.png" width="250" alt="Coastal cliff at 8,000 triangles"></td><td><img src="gallery/cliff-l2-served.png" width="250" alt="Coastal cliff at 8,000 triangles, 0.4 radii away"></td><td><img src="gallery/cliff-l2-edges.png" width="250" alt="8,000 triangles of Coastal cliff"></td></tr>
+<tr><td valign="top" width="140"><b>4,000</b> tri<br><sub>one pixel of error past <b>2.4 radii</b><br>drawn there; outline 1.93%, shading 72.1%</sub></td><td><img src="gallery/cliff-l3-shaded.png" width="250" alt="Coastal cliff at 4,000 triangles"></td><td><img src="gallery/cliff-l3-served.png" width="250" alt="Coastal cliff at 4,000 triangles, 2.4 radii away"></td><td><img src="gallery/cliff-l3-edges.png" width="250" alt="4,000 triangles of Coastal cliff"></td></tr>
+<tr><td valign="top" width="140"><b>2,000</b> tri<br><sub>one pixel of error past <b>3.7 radii</b><br>drawn there; outline 3.23%, shading 74.9%</sub></td><td><img src="gallery/cliff-l4-shaded.png" width="250" alt="Coastal cliff at 2,000 triangles"></td><td><img src="gallery/cliff-l4-served.png" width="250" alt="Coastal cliff at 2,000 triangles, 3.7 radii away"></td><td><img src="gallery/cliff-l4-edges.png" width="250" alt="2,000 triangles of Coastal cliff"></td></tr>
+<tr><td valign="top" width="140"><b>999</b> tri<br><sub>one pixel of error past <b>7.2 radii</b><br>drawn there; outline 8.85%, shading 72.6%</sub></td><td><img src="gallery/cliff-l5-shaded.png" width="250" alt="Coastal cliff at 999 triangles"></td><td><img src="gallery/cliff-l5-served.png" width="250" alt="Coastal cliff at 999 triangles, 7.2 radii away"></td><td><img src="gallery/cliff-l5-edges.png" width="250" alt="999 triangles of Coastal cliff"></td></tr>
+<tr><td valign="top" width="140"><b>500</b> tri<br><sub><b>past here, an imposter</b><br>one pixel of error past <b>11.6 radii</b><br>drawn there; outline 10.00%, shading 70.0%</sub></td><td><img src="gallery/cliff-l6-shaded.png" width="250" alt="Coastal cliff at 500 triangles"></td><td><img src="gallery/cliff-l6-served.png" width="250" alt="Coastal cliff at 500 triangles, 11.6 radii away"></td><td><img src="gallery/cliff-l6-edges.png" width="250" alt="500 triangles of Coastal cliff"></td></tr>
 </table>
 
 ## Lekking ruffs
 
 A museum scan exported as twenty-five primitives, each stopping at the 65,535 vertices a 16-bit index can name -- so the reduction sees one surface only because the primitives are merged and welded first. Nine of its thirteen components are specks the photogrammetry left behind, and `drop_components_below` takes them: 572 triangles, which is fifteen per cent of what the coarsest rung has to spend.
 
-This is the subject whose atlas decides the answer, so it is the one reduced with `lock_seams`. A third of its edges are on a chart boundary, and the chain stops where the seam network is all that is left. Without the lock it reaches two thousand triangles, and by eight thousand each triangle is already sampling two and a half times the texture it should -- the levels are there, but the bird is not on them. See **Where a chain stops** below.
+A third of its edges are on a texture chart boundary, which is what this subject has to say. `lock_seams` would hold every one of them and stop the chain at 57,503 triangles -- a level no game would draw, and no chain at all. So it is reduced without, and what that costs is visible above: by the coarse rungs each triangle samples several times the texture it should, and the feathers go with it. An atlas cut into thousands of small charts is a modelling decision that a decimator cannot undo. See **Where a chain stops** below.
 
 | | |
 |---|---|
 | Source | 547,647 triangles, 1,601,690 vertices, 25 primitives over 2 materials |
 | Welded to | 273,414 points |
-| Reduced in | 7.5 s, 244,786 contractions |
-| Floor | 57,503 triangles, where no contraction is left that keeps the surface a surface |
+| Reduced in | 6.3 s, 271,735 contractions |
+| Floor | 3,614 triangles, where no contraction is left that keeps the surface a surface |
 | Credit | 'Lekking ruffs', inventory MP 045, from the Krystyna and Włodzimierz Tomek Natural Science Museum in Ciężkowice, Poland. Digitised by the Regional Digitalisation Lab, Małopolska Institute of Culture in Kraków, for the [Virtual Museums of Małopolska](https://muzea.malopolska.pl/en/objects-list/2250) project, CC0 |
 
 | Triangles | Of source | `result.error` | Measured | Replay | Draw | Frame rate | One pixel past | Outline | Shading |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 547,075 *(the source, for reference)* | source | 0.00000 | -- | 900 ms | 0.23 ms | 4,288 | -- | -- | -- |
-| 57,503 *(the finest a game would ship)* | 10.5% | 0.00625 | 0.00442 | 128 ms | 0.11 ms | 9,070 | 2.5 r | 1.52% | 64.3% |
+| 547,075 *(the source, for reference)* | source | 0.00000 | -- | 917 ms | 0.22 ms | 4,606 | -- | -- | -- |
+| 32,000 *(the finest a game would ship)* | 5.8% | 0.00120 | 0.00542 | 114 ms | 0.10 ms | 10,090 | 3.3 r | 1.57% | 55.0% |
+| 8,000 | 1.5% | 0.00452 | 0.02933 | 47 ms | 0.06 ms | 17,305 | 22.1 r | 4.44% | 57.0% |
+| 4,542 | 0.83% | 0.05172 | 0.07872 | 38 ms | 0.06 ms | 16,547 | 60.9 r | 11.29% | 72.6% |
+| 3,614 | 0.66% | 0.05172 | 0.14003 | 35 ms | 0.06 ms | 16,609 | 109.1 r | 17.74% | 71.0% |
 
 <table>
 <tr><th align="left">Level</th><th align="left">Close up</th><th align="left">Where it is used</th><th align="left">Its triangles</th></tr>
 <tr><td valign="top" width="140"><b>547,075</b> tri<br><sub><b>the source, for reference</b><br>the source, drawn where the finest level is</sub></td><td><img src="gallery/ruffs-l0-shaded.png" width="250" alt="Lekking ruffs at 547,075 triangles"></td><td><img src="gallery/ruffs-l0-served.png" width="250" alt="Lekking ruffs at 547,075 triangles, 0.2 radii away"></td><td><img src="gallery/ruffs-l0-edges.png" width="250" alt="547,075 triangles of Lekking ruffs"></td></tr>
-<tr><td valign="top" width="140"><b>57,503</b> tri<br><sub><b>the finest a game would ship</b><br>one pixel of error past <b>2.5 radii</b><br>drawn there; outline 1.52%, shading 64.3%</sub></td><td><img src="gallery/ruffs-l1-shaded.png" width="250" alt="Lekking ruffs at 57,503 triangles"></td><td><img src="gallery/ruffs-l1-served.png" width="250" alt="Lekking ruffs at 57,503 triangles, 0.2 radii away"></td><td><img src="gallery/ruffs-l1-edges.png" width="250" alt="57,503 triangles of Lekking ruffs"></td></tr>
+<tr><td valign="top" width="140"><b>32,000</b> tri<br><sub><b>the finest a game would ship</b><br>one pixel of error past <b>3.3 radii</b><br>drawn there; outline 1.57%, shading 55.0%</sub></td><td><img src="gallery/ruffs-l1-shaded.png" width="250" alt="Lekking ruffs at 32,000 triangles"></td><td><img src="gallery/ruffs-l1-served.png" width="250" alt="Lekking ruffs at 32,000 triangles, 0.2 radii away"></td><td><img src="gallery/ruffs-l1-edges.png" width="250" alt="32,000 triangles of Lekking ruffs"></td></tr>
+<tr><td valign="top" width="140"><b>8,000</b> tri<br><sub>one pixel of error past <b>22.1 radii</b><br>drawn there; outline 4.44%, shading 57.0%</sub></td><td><img src="gallery/ruffs-l2-shaded.png" width="250" alt="Lekking ruffs at 8,000 triangles"></td><td><img src="gallery/ruffs-l2-served.png" width="250" alt="Lekking ruffs at 8,000 triangles, 22.1 radii away"></td><td><img src="gallery/ruffs-l2-edges.png" width="250" alt="8,000 triangles of Lekking ruffs"></td></tr>
+<tr><td valign="top" width="140"><b>4,542</b> tri<br><sub>one pixel of error past <b>60.9 radii</b><br>drawn there; outline 11.29%, shading 72.6%</sub></td><td><img src="gallery/ruffs-l3-shaded.png" width="250" alt="Lekking ruffs at 4,542 triangles"></td><td><img src="gallery/ruffs-l3-served.png" width="250" alt="Lekking ruffs at 4,542 triangles, 32.0 radii away"></td><td><img src="gallery/ruffs-l3-edges.png" width="250" alt="4,542 triangles of Lekking ruffs"></td></tr>
+<tr><td valign="top" width="140"><b>3,614</b> tri<br><sub>one pixel of error past <b>109.1 radii</b><br>drawn there; outline 17.74%, shading 71.0%</sub></td><td><img src="gallery/ruffs-l4-shaded.png" width="250" alt="Lekking ruffs at 3,614 triangles"></td><td><img src="gallery/ruffs-l4-served.png" width="250" alt="Lekking ruffs at 3,614 triangles, 32.0 radii away"></td><td><img src="gallery/ruffs-l4-edges.png" width="250" alt="3,614 triangles of Lekking ruffs"></td></tr>
 </table>
 
 ## Coastal land rocks
@@ -100,60 +105,28 @@ Several separate boulders in one mesh, so the reduction has to spend across them
 |---|---|
 | Source | 1,291,146 triangles, 662,707 vertices, 1 primitive over 1 material |
 | Welded to | 647,007 points |
-| Reduced in | 9.5 s, 646,979 contractions |
+| Reduced in | 9.6 s, 646,979 contractions |
 | Credit | 'Coast Land Rocks 02' by Rob Tuytel and Rico Cilliers, from [Poly Haven](https://polyhaven.com/a/coast_land_rocks_02), CC0 |
 
 | Triangles | Of source | `result.error` | Measured | Replay | Draw | Frame rate | One pixel past | Outline | Shading |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1,291,146 *(the source, for reference)* | source | 0.00000 | -- | 2701 ms | 0.17 ms | 6,060 | -- | -- | -- |
-| 32,000 *(the finest a game would ship)* | 2.5% | 0.00981 | 0.02428 | 78 ms | 0.05 ms | 22,176 | 0.4 r | 0.93% | 72.6% |
-| 7,999 | 0.62% | 0.02303 | 0.05760 | 47 ms | 0.04 ms | 24,290 | 2.4 r | 3.51% | 77.6% |
-| 3,999 | 0.31% | 0.03422 | 0.07442 | 41 ms | 0.04 ms | 24,833 | 3.4 r | 4.99% | 79.9% |
-| 1,999 | 0.15% | 0.04964 | 0.13543 | 37 ms | 0.04 ms | 26,999 | 7.0 r | 9.57% | 74.6% |
-| 999 | 0.08% | 0.07210 | 0.19508 | 36 ms | 0.04 ms | 27,402 | 10.5 r | 11.83% | 75.3% |
-| 500 *(past here, an imposter)* | 0.04% | 0.10611 | 0.31521 | 35 ms | 0.04 ms | 25,662 | 17.5 r | 12.50% | 75.0% |
+| 1,291,146 *(the source, for reference)* | source | 0.00000 | -- | 2684 ms | 0.17 ms | 5,915 | -- | -- | -- |
+| 32,000 *(the finest a game would ship)* | 2.5% | 0.00981 | 0.02428 | 124 ms | 0.04 ms | 22,320 | 0.4 r | 0.93% | 64.5% |
+| 7,999 | 0.62% | 0.02303 | 0.05760 | 53 ms | 0.04 ms | 24,923 | 2.4 r | 3.51% | 70.6% |
+| 3,999 | 0.31% | 0.03422 | 0.07442 | 44 ms | 0.04 ms | 23,848 | 3.4 r | 4.99% | 69.4% |
+| 1,999 | 0.15% | 0.04964 | 0.13543 | 40 ms | 0.04 ms | 26,466 | 7.0 r | 9.57% | 69.9% |
+| 999 | 0.08% | 0.07210 | 0.19508 | 37 ms | 0.04 ms | 25,768 | 10.5 r | 11.83% | 75.3% |
+| 500 *(past here, an imposter)* | 0.04% | 0.10611 | 0.31521 | 38 ms | 0.04 ms | 22,402 | 17.5 r | 12.50% | 70.0% |
 
 <table>
 <tr><th align="left">Level</th><th align="left">Close up</th><th align="left">Where it is used</th><th align="left">Its triangles</th></tr>
 <tr><td valign="top" width="140"><b>1,291,146</b> tri<br><sub><b>the source, for reference</b><br>the source, drawn where the finest level is</sub></td><td><img src="gallery/rocks-l0-shaded.png" width="250" alt="Coastal land rocks at 1,291,146 triangles"></td><td><img src="gallery/rocks-l0-served.png" width="250" alt="Coastal land rocks at 1,291,146 triangles, 0.2 radii away"></td><td><img src="gallery/rocks-l0-edges.png" width="250" alt="1,291,146 triangles of Coastal land rocks"></td></tr>
-<tr><td valign="top" width="140"><b>32,000</b> tri<br><sub><b>the finest a game would ship</b><br>one pixel of error past <b>0.4 radii</b><br>drawn there; outline 0.93%, shading 72.6%</sub></td><td><img src="gallery/rocks-l1-shaded.png" width="250" alt="Coastal land rocks at 32,000 triangles"></td><td><img src="gallery/rocks-l1-served.png" width="250" alt="Coastal land rocks at 32,000 triangles, 0.2 radii away"></td><td><img src="gallery/rocks-l1-edges.png" width="250" alt="32,000 triangles of Coastal land rocks"></td></tr>
-<tr><td valign="top" width="140"><b>7,999</b> tri<br><sub>one pixel of error past <b>2.4 radii</b><br>drawn there; outline 3.51%, shading 77.6%</sub></td><td><img src="gallery/rocks-l2-shaded.png" width="250" alt="Coastal land rocks at 7,999 triangles"></td><td><img src="gallery/rocks-l2-served.png" width="250" alt="Coastal land rocks at 7,999 triangles, 2.4 radii away"></td><td><img src="gallery/rocks-l2-edges.png" width="250" alt="7,999 triangles of Coastal land rocks"></td></tr>
-<tr><td valign="top" width="140"><b>3,999</b> tri<br><sub>one pixel of error past <b>3.4 radii</b><br>drawn there; outline 4.99%, shading 79.9%</sub></td><td><img src="gallery/rocks-l3-shaded.png" width="250" alt="Coastal land rocks at 3,999 triangles"></td><td><img src="gallery/rocks-l3-served.png" width="250" alt="Coastal land rocks at 3,999 triangles, 3.4 radii away"></td><td><img src="gallery/rocks-l3-edges.png" width="250" alt="3,999 triangles of Coastal land rocks"></td></tr>
-<tr><td valign="top" width="140"><b>1,999</b> tri<br><sub>one pixel of error past <b>7.0 radii</b><br>drawn there; outline 9.57%, shading 74.6%</sub></td><td><img src="gallery/rocks-l4-shaded.png" width="250" alt="Coastal land rocks at 1,999 triangles"></td><td><img src="gallery/rocks-l4-served.png" width="250" alt="Coastal land rocks at 1,999 triangles, 7.0 radii away"></td><td><img src="gallery/rocks-l4-edges.png" width="250" alt="1,999 triangles of Coastal land rocks"></td></tr>
+<tr><td valign="top" width="140"><b>32,000</b> tri<br><sub><b>the finest a game would ship</b><br>one pixel of error past <b>0.4 radii</b><br>drawn there; outline 0.93%, shading 64.5%</sub></td><td><img src="gallery/rocks-l1-shaded.png" width="250" alt="Coastal land rocks at 32,000 triangles"></td><td><img src="gallery/rocks-l1-served.png" width="250" alt="Coastal land rocks at 32,000 triangles, 0.2 radii away"></td><td><img src="gallery/rocks-l1-edges.png" width="250" alt="32,000 triangles of Coastal land rocks"></td></tr>
+<tr><td valign="top" width="140"><b>7,999</b> tri<br><sub>one pixel of error past <b>2.4 radii</b><br>drawn there; outline 3.51%, shading 70.6%</sub></td><td><img src="gallery/rocks-l2-shaded.png" width="250" alt="Coastal land rocks at 7,999 triangles"></td><td><img src="gallery/rocks-l2-served.png" width="250" alt="Coastal land rocks at 7,999 triangles, 2.4 radii away"></td><td><img src="gallery/rocks-l2-edges.png" width="250" alt="7,999 triangles of Coastal land rocks"></td></tr>
+<tr><td valign="top" width="140"><b>3,999</b> tri<br><sub>one pixel of error past <b>3.4 radii</b><br>drawn there; outline 4.99%, shading 69.4%</sub></td><td><img src="gallery/rocks-l3-shaded.png" width="250" alt="Coastal land rocks at 3,999 triangles"></td><td><img src="gallery/rocks-l3-served.png" width="250" alt="Coastal land rocks at 3,999 triangles, 3.4 radii away"></td><td><img src="gallery/rocks-l3-edges.png" width="250" alt="3,999 triangles of Coastal land rocks"></td></tr>
+<tr><td valign="top" width="140"><b>1,999</b> tri<br><sub>one pixel of error past <b>7.0 radii</b><br>drawn there; outline 9.57%, shading 69.9%</sub></td><td><img src="gallery/rocks-l4-shaded.png" width="250" alt="Coastal land rocks at 1,999 triangles"></td><td><img src="gallery/rocks-l4-served.png" width="250" alt="Coastal land rocks at 1,999 triangles, 7.0 radii away"></td><td><img src="gallery/rocks-l4-edges.png" width="250" alt="1,999 triangles of Coastal land rocks"></td></tr>
 <tr><td valign="top" width="140"><b>999</b> tri<br><sub>one pixel of error past <b>10.5 radii</b><br>drawn there; outline 11.83%, shading 75.3%</sub></td><td><img src="gallery/rocks-l5-shaded.png" width="250" alt="Coastal land rocks at 999 triangles"></td><td><img src="gallery/rocks-l5-served.png" width="250" alt="Coastal land rocks at 999 triangles, 10.5 radii away"></td><td><img src="gallery/rocks-l5-edges.png" width="250" alt="999 triangles of Coastal land rocks"></td></tr>
-<tr><td valign="top" width="140"><b>500</b> tri<br><sub><b>past here, an imposter</b><br>one pixel of error past <b>17.5 radii</b><br>drawn there; outline 12.50%, shading 75.0%</sub></td><td><img src="gallery/rocks-l6-shaded.png" width="250" alt="Coastal land rocks at 500 triangles"></td><td><img src="gallery/rocks-l6-served.png" width="250" alt="Coastal land rocks at 500 triangles, 17.5 radii away"></td><td><img src="gallery/rocks-l6-edges.png" width="250" alt="500 triangles of Coastal land rocks"></td></tr>
-</table>
-
-## Island tree
-
-The hard case. A canopy of alpha-cut leaf cards barely welds at all -- 2,085,320 triangles over 1,598,940 points -- because almost no two cards share a vertex, and a card cannot be reduced below the triangles that carry its cutout.
-
-| | |
-|---|---|
-| Source | 2,085,320 triangles, 1,708,346 vertices, 3 primitives over 3 materials |
-| Welded to | 1,598,940 points |
-| Reduced in | 13.1 s, 1,454,992 contractions |
-| Credit | 'Island Tree 03' by Rob Tuytel and Rico Cilliers, from [Poly Haven](https://polyhaven.com/a/island_tree_03), CC0 |
-
-| Triangles | Of source | `result.error` | Measured | Replay | Draw | Frame rate | One pixel past | Outline | Shading |
-|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 2,085,320 *(the source, for reference)* | source | 0.00000 | -- | 1621 ms | 0.33 ms | 3,047 | -- | -- | -- |
-| 31,999 *(the finest a game would ship)* | 1.5% | 0.01902 | 0.23840 | 98 ms | 0.05 ms | 21,341 | 34.9 r | 35.58% | 39.9% |
-| 13,978 | 0.67% | 0.12872 | 0.87611 | 84 ms | 0.04 ms | 26,586 | 131.0 r | 46.34% | 39.0% |
-| 11,260 | 0.54% | 0.20494 | 1.16178 | 82 ms | 0.04 ms | 26,772 | 174.1 r | 51.16% | 37.2% |
-| 9,909 | 0.48% | 0.20494 | 1.55414 | 83 ms | 0.04 ms | 27,134 | 233.2 r | 55.81% | 32.6% |
-| 9,234 | 0.44% | 0.20494 | 1.68257 | 82 ms | 0.04 ms | 27,424 | 252.6 r | 55.81% | 32.6% |
-| 8,896 *(past here, an imposter)* | 0.43% | 0.20494 | 1.71440 | 81 ms | 0.04 ms | 25,452 | 257.4 r | 58.14% | 30.2% |
-
-<table>
-<tr><th align="left">Level</th><th align="left">Close up</th><th align="left">Where it is used</th><th align="left">Its triangles</th></tr>
-<tr><td valign="top" width="140"><b>2,085,320</b> tri<br><sub><b>the source, for reference</b><br>the source, drawn where the finest level is</sub></td><td><img src="gallery/tree-l0-shaded.png" width="250" alt="Island tree at 2,085,320 triangles"></td><td><img src="gallery/tree-l0-served.png" width="250" alt="Island tree at 2,085,320 triangles, 0.2 radii away"></td><td><img src="gallery/tree-l0-edges.png" width="250" alt="2,085,320 triangles of Island tree"></td></tr>
-<tr><td valign="top" width="140"><b>31,999</b> tri<br><sub><b>the finest a game would ship</b><br>one pixel of error past <b>34.9 radii</b><br>drawn there; outline 35.58%, shading 39.9%</sub></td><td><img src="gallery/tree-l1-shaded.png" width="250" alt="Island tree at 31,999 triangles"></td><td><img src="gallery/tree-l1-served.png" width="250" alt="Island tree at 31,999 triangles, 0.2 radii away"></td><td><img src="gallery/tree-l1-edges.png" width="250" alt="31,999 triangles of Island tree"></td></tr>
-<tr><td valign="top" width="140"><b>13,978</b> tri<br><sub>one pixel of error past <b>131.0 radii</b><br>drawn there; outline 46.34%, shading 39.0%</sub></td><td><img src="gallery/tree-l2-shaded.png" width="250" alt="Island tree at 13,978 triangles"></td><td><img src="gallery/tree-l2-served.png" width="250" alt="Island tree at 13,978 triangles, 32.0 radii away"></td><td><img src="gallery/tree-l2-edges.png" width="250" alt="13,978 triangles of Island tree"></td></tr>
-<tr><td valign="top" width="140"><b>11,260</b> tri<br><sub>one pixel of error past <b>174.1 radii</b><br>drawn there; outline 51.16%, shading 37.2%</sub></td><td><img src="gallery/tree-l3-shaded.png" width="250" alt="Island tree at 11,260 triangles"></td><td><img src="gallery/tree-l3-served.png" width="250" alt="Island tree at 11,260 triangles, 32.0 radii away"></td><td><img src="gallery/tree-l3-edges.png" width="250" alt="11,260 triangles of Island tree"></td></tr>
-<tr><td valign="top" width="140"><b>9,909</b> tri<br><sub>one pixel of error past <b>233.2 radii</b><br>drawn there; outline 55.81%, shading 32.6%</sub></td><td><img src="gallery/tree-l4-shaded.png" width="250" alt="Island tree at 9,909 triangles"></td><td><img src="gallery/tree-l4-served.png" width="250" alt="Island tree at 9,909 triangles, 32.0 radii away"></td><td><img src="gallery/tree-l4-edges.png" width="250" alt="9,909 triangles of Island tree"></td></tr>
-<tr><td valign="top" width="140"><b>9,234</b> tri<br><sub>one pixel of error past <b>252.6 radii</b><br>drawn there; outline 55.81%, shading 32.6%</sub></td><td><img src="gallery/tree-l5-shaded.png" width="250" alt="Island tree at 9,234 triangles"></td><td><img src="gallery/tree-l5-served.png" width="250" alt="Island tree at 9,234 triangles, 32.0 radii away"></td><td><img src="gallery/tree-l5-edges.png" width="250" alt="9,234 triangles of Island tree"></td></tr>
-<tr><td valign="top" width="140"><b>8,896</b> tri<br><sub><b>past here, an imposter</b><br>one pixel of error past <b>257.4 radii</b><br>drawn there; outline 58.14%, shading 30.2%</sub></td><td><img src="gallery/tree-l6-shaded.png" width="250" alt="Island tree at 8,896 triangles"></td><td><img src="gallery/tree-l6-served.png" width="250" alt="Island tree at 8,896 triangles, 32.0 radii away"></td><td><img src="gallery/tree-l6-edges.png" width="250" alt="8,896 triangles of Island tree"></td></tr>
+<tr><td valign="top" width="140"><b>500</b> tri<br><sub><b>past here, an imposter</b><br>one pixel of error past <b>17.5 radii</b><br>drawn there; outline 12.50%, shading 70.0%</sub></td><td><img src="gallery/rocks-l6-shaded.png" width="250" alt="Coastal land rocks at 500 triangles"></td><td><img src="gallery/rocks-l6-served.png" width="250" alt="Coastal land rocks at 500 triangles, 17.5 radii away"></td><td><img src="gallery/rocks-l6-edges.png" width="250" alt="500 triangles of Coastal land rocks"></td></tr>
 </table>
 
 ## Marble bust
@@ -169,21 +142,21 @@ Small enough to read every triangle, and a face is where an error is obvious.
 
 | Triangles | Of source | `result.error` | Measured | Replay | Draw | Frame rate | One pixel past | Outline | Shading |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 17,456 *(the source, for reference)* | source | 0.00000 | -- | 18 ms | 0.04 ms | 25,366 | -- | -- | -- |
-| 8,000 *(the finest a game would ship)* | 45.8% | 0.00026 | 0.00074 | 8 ms | 0.04 ms | 24,867 | 0.0 r | 0.04% | 7.5% |
-| 4,000 | 22.9% | 0.00055 | 0.00153 | 5 ms | 0.04 ms | 24,883 | 0.7 r | 0.24% | 25.2% |
-| 2,000 | 11.5% | 0.00098 | 0.00427 | 3 ms | 0.04 ms | 25,155 | 3.8 r | 0.62% | 45.3% |
-| 1,000 | 5.7% | 0.00172 | 0.00468 | 2 ms | 0.04 ms | 27,227 | 4.2 r | 1.51% | 59.0% |
-| 500 *(past here, an imposter)* | 2.9% | 0.00292 | 0.00940 | 1 ms | 0.04 ms | 25,095 | 9.5 r | 1.92% | 70.1% |
+| 17,456 *(the source, for reference)* | source | 0.00000 | -- | 18 ms | 0.04 ms | 24,656 | -- | -- | -- |
+| 8,000 *(the finest a game would ship)* | 45.8% | 0.00026 | 0.00074 | 14 ms | 0.04 ms | 25,193 | 0.0 r | 0.04% | 5.2% |
+| 4,000 | 22.9% | 0.00055 | 0.00153 | 12 ms | 0.04 ms | 27,167 | 0.7 r | 0.24% | 15.9% |
+| 2,000 | 11.5% | 0.00098 | 0.00427 | 4 ms | 0.04 ms | 27,387 | 3.8 r | 0.62% | 30.7% |
+| 1,000 | 5.7% | 0.00172 | 0.00468 | 3 ms | 0.04 ms | 23,008 | 4.2 r | 1.51% | 45.8% |
+| 500 *(past here, an imposter)* | 2.9% | 0.00292 | 0.00940 | 2 ms | 0.04 ms | 25,273 | 9.5 r | 1.92% | 53.3% |
 
 <table>
 <tr><th align="left">Level</th><th align="left">Close up</th><th align="left">Where it is used</th><th align="left">Its triangles</th></tr>
 <tr><td valign="top" width="140"><b>17,456</b> tri<br><sub><b>the source, for reference</b><br>the source, drawn where the finest level is</sub></td><td><img src="gallery/bust-l0-shaded.png" width="250" alt="Marble bust at 17,456 triangles"></td><td><img src="gallery/bust-l0-served.png" width="250" alt="Marble bust at 17,456 triangles, 0.2 radii away"></td><td><img src="gallery/bust-l0-edges.png" width="250" alt="17,456 triangles of Marble bust"></td></tr>
-<tr><td valign="top" width="140"><b>8,000</b> tri<br><sub><b>the finest a game would ship</b><br>one pixel of error past <b>0.0 radii</b><br>drawn there; outline 0.04%, shading 7.5%</sub></td><td><img src="gallery/bust-l1-shaded.png" width="250" alt="Marble bust at 8,000 triangles"></td><td><img src="gallery/bust-l1-served.png" width="250" alt="Marble bust at 8,000 triangles, 0.2 radii away"></td><td><img src="gallery/bust-l1-edges.png" width="250" alt="8,000 triangles of Marble bust"></td></tr>
-<tr><td valign="top" width="140"><b>4,000</b> tri<br><sub>one pixel of error past <b>0.7 radii</b><br>drawn there; outline 0.24%, shading 25.2%</sub></td><td><img src="gallery/bust-l2-shaded.png" width="250" alt="Marble bust at 4,000 triangles"></td><td><img src="gallery/bust-l2-served.png" width="250" alt="Marble bust at 4,000 triangles, 0.7 radii away"></td><td><img src="gallery/bust-l2-edges.png" width="250" alt="4,000 triangles of Marble bust"></td></tr>
-<tr><td valign="top" width="140"><b>2,000</b> tri<br><sub>one pixel of error past <b>3.8 radii</b><br>drawn there; outline 0.62%, shading 45.3%</sub></td><td><img src="gallery/bust-l3-shaded.png" width="250" alt="Marble bust at 2,000 triangles"></td><td><img src="gallery/bust-l3-served.png" width="250" alt="Marble bust at 2,000 triangles, 3.8 radii away"></td><td><img src="gallery/bust-l3-edges.png" width="250" alt="2,000 triangles of Marble bust"></td></tr>
-<tr><td valign="top" width="140"><b>1,000</b> tri<br><sub>one pixel of error past <b>4.2 radii</b><br>drawn there; outline 1.51%, shading 59.0%</sub></td><td><img src="gallery/bust-l4-shaded.png" width="250" alt="Marble bust at 1,000 triangles"></td><td><img src="gallery/bust-l4-served.png" width="250" alt="Marble bust at 1,000 triangles, 4.2 radii away"></td><td><img src="gallery/bust-l4-edges.png" width="250" alt="1,000 triangles of Marble bust"></td></tr>
-<tr><td valign="top" width="140"><b>500</b> tri<br><sub><b>past here, an imposter</b><br>one pixel of error past <b>9.5 radii</b><br>drawn there; outline 1.92%, shading 70.1%</sub></td><td><img src="gallery/bust-l5-shaded.png" width="250" alt="Marble bust at 500 triangles"></td><td><img src="gallery/bust-l5-served.png" width="250" alt="Marble bust at 500 triangles, 9.5 radii away"></td><td><img src="gallery/bust-l5-edges.png" width="250" alt="500 triangles of Marble bust"></td></tr>
+<tr><td valign="top" width="140"><b>8,000</b> tri<br><sub><b>the finest a game would ship</b><br>one pixel of error past <b>0.0 radii</b><br>drawn there; outline 0.04%, shading 5.2%</sub></td><td><img src="gallery/bust-l1-shaded.png" width="250" alt="Marble bust at 8,000 triangles"></td><td><img src="gallery/bust-l1-served.png" width="250" alt="Marble bust at 8,000 triangles, 0.2 radii away"></td><td><img src="gallery/bust-l1-edges.png" width="250" alt="8,000 triangles of Marble bust"></td></tr>
+<tr><td valign="top" width="140"><b>4,000</b> tri<br><sub>one pixel of error past <b>0.7 radii</b><br>drawn there; outline 0.24%, shading 15.9%</sub></td><td><img src="gallery/bust-l2-shaded.png" width="250" alt="Marble bust at 4,000 triangles"></td><td><img src="gallery/bust-l2-served.png" width="250" alt="Marble bust at 4,000 triangles, 0.7 radii away"></td><td><img src="gallery/bust-l2-edges.png" width="250" alt="4,000 triangles of Marble bust"></td></tr>
+<tr><td valign="top" width="140"><b>2,000</b> tri<br><sub>one pixel of error past <b>3.8 radii</b><br>drawn there; outline 0.62%, shading 30.7%</sub></td><td><img src="gallery/bust-l3-shaded.png" width="250" alt="Marble bust at 2,000 triangles"></td><td><img src="gallery/bust-l3-served.png" width="250" alt="Marble bust at 2,000 triangles, 3.8 radii away"></td><td><img src="gallery/bust-l3-edges.png" width="250" alt="2,000 triangles of Marble bust"></td></tr>
+<tr><td valign="top" width="140"><b>1,000</b> tri<br><sub>one pixel of error past <b>4.2 radii</b><br>drawn there; outline 1.51%, shading 45.8%</sub></td><td><img src="gallery/bust-l4-shaded.png" width="250" alt="Marble bust at 1,000 triangles"></td><td><img src="gallery/bust-l4-served.png" width="250" alt="Marble bust at 1,000 triangles, 4.2 radii away"></td><td><img src="gallery/bust-l4-edges.png" width="250" alt="1,000 triangles of Marble bust"></td></tr>
+<tr><td valign="top" width="140"><b>500</b> tri<br><sub><b>past here, an imposter</b><br>one pixel of error past <b>9.5 radii</b><br>drawn there; outline 1.92%, shading 53.3%</sub></td><td><img src="gallery/bust-l5-shaded.png" width="250" alt="Marble bust at 500 triangles"></td><td><img src="gallery/bust-l5-served.png" width="250" alt="Marble bust at 500 triangles, 9.5 radii away"></td><td><img src="gallery/bust-l5-edges.png" width="250" alt="500 triangles of Marble bust"></td></tr>
 </table>
 
 ## Where a chain stops
@@ -199,9 +172,8 @@ Some subjects above run out of ladder before they run out of rungs. A reduction 
 | Subject | Pieces | Handles | Edges held by a seam | Floor |
 |---|---:|---:|---:|---:|
 | Coastal cliff | 3 | 1 | 3.2% | reached the bottom of the chain |
-| Lekking ruffs | 4 | 201 | 35.1% | 57,503 tri |
+| Lekking ruffs | 4 | 201 | 35.1% | 3,614 tri |
 | Coastal land rocks | 1 | 5 | 3.4% | reached the bottom of the chain |
-| Island tree | 69,573 | 34,788 | 11.8% | 8,896 tri, where 500 was asked for |
 | Marble bust | 1 | 0 | 15.0% | reached the bottom of the chain |
 
 A subject that stops is not a subject the reducer gave up on: every contraction left would have cost the model one of the three properties above. What such an asset needs is a different operation -- an imposter, a re-authored atlas, foliage baked to larger cards -- rather than a lower target.
