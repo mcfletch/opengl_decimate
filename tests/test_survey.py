@@ -123,3 +123,70 @@ class TestWhatStopsAReduction:
         assert report.welded_away == 1
         assert report.pieces == 1
         assert report.points == 6
+
+
+class TestHowTheAtlasIsCutUp:
+    """A texture cannot describe a triangle larger than the chart it sits in.
+
+    An atlas is a set of charts -- connected pieces of surface laid out flat --
+    and a texture coordinate is only meaningful inside one. Reduce past the
+    point where an output triangle spans more surface than a chart holds and
+    there is no coordinate that describes it, whatever the reducer does. That is
+    a property of how the model was unwrapped, measurable before a reduction.
+    """
+
+    @staticmethod
+    def _striped(side=17, stripes=4):
+        """A patch cut into vertical chart stripes, each its own piece of atlas."""
+        positions, indices = shapes.grid(side)
+        faces = np.asarray(indices, dtype=np.int64).reshape(-1, 3)
+        positions = np.asarray(positions, dtype='f4')
+        column = np.arange(len(positions)) // side
+        band = np.minimum(column * stripes // side, stripes - 1)
+        # Every band gets its own copy of every vertex, so no vertex is shared
+        # across a boundary -- which is what makes it a chart boundary.
+        copies, remap = [positions], {}
+        base = len(positions)
+        for step in range(1, stripes):
+            remap[step] = base + np.arange(len(positions))
+            copies.append(positions)
+            base += len(positions)
+        doubled = np.concatenate(copies)
+        flat = ((doubled[:, [0, 2]] + 1.0) * 0.5).astype('f4')
+        for step in range(1, stripes):
+            flat[remap[step]] += (step * 10.0, 0.0)
+        face_band = band[faces].min(axis=1)
+        for step in range(1, stripes):
+            moved = face_band == step
+            faces[moved] = remap[step][faces[moved]]
+        return (
+            {'POSITION': doubled, 'TEXCOORD_0': flat},
+            faces.reshape(-1).astype(np.uint32),
+        )
+
+    def test_one_chart_where_the_model_is_unwrapped_whole(self):
+        positions, indices = shapes.grid(17)
+        uv = ((np.asarray(positions)[:, [0, 2]] + 1.0) * 0.5).astype('f4')
+        report = survey({'POSITION': positions, 'TEXCOORD_0': uv}, indices)
+        assert report.charts == 1
+        assert report.median_chart == report.triangles
+
+    def test_a_mesh_carrying_no_texture_has_no_atlas_to_measure(self):
+        positions, indices = shapes.icosphere(2)
+        report = survey({'POSITION': positions}, indices)
+        assert report.charts == 0
+        assert report.texture_floor == 0
+
+    def test_the_stripes_are_counted(self):
+        attributes, indices = self._striped(17, 4)
+        report = survey(attributes, indices)
+        assert report.charts == 4
+        assert report.median_chart == report.triangles // 4
+
+    def test_a_finely_cut_atlas_puts_a_floor_under_what_the_texture_survives(self):
+        """More charts is a higher floor, for the same model and triangle count."""
+        coarse = survey(*self._striped(33, 2))
+        fine = survey(*self._striped(33, 16))
+        assert coarse.triangles == fine.triangles
+        assert fine.charts > coarse.charts
+        assert fine.texture_floor > coarse.texture_floor

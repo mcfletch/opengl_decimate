@@ -24,8 +24,8 @@ a model is loaded.
 ## `survey(attributes, indices) -> Survey`
 
 Measure what would stop a reduction of this mesh, without running one. Takes the
-same arrays as `simplify`; reads texture coordinates where they are there, to
-find the atlas seams, and nothing else.
+same arrays as `simplify`. Texture coordinates are read where they are there, to
+find the seams and the charts of the atlas; nothing else the mesh carries is.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -37,6 +37,10 @@ find the atlas seams, and nothing else.
 | `largest_piece` | `int` | triangles in the largest, which is the subject where the rest are specks |
 | `handles` | `int` | tunnels through the surface, from Euler's formula |
 | `seam_share` | `float` | share of edges whose ends are drawn at different numbers of texture coordinates — what `lock_seams` refuses |
+| `charts` | `int` | pieces the texture atlas is cut into; 0 for a mesh carrying no texture coordinates |
+| `median_chart` | `int` | triangles in the middle chart |
+| `small_chart` | `int` | triangles in the smaller quarter of them |
+| `texture_floor` | `int` | below this many triangles the texture stops describing the model: one output triangle grows to the size of a chart in the smaller quarter, so a quarter of the surface is being drawn from charts too small to fit it. An estimate, and a property of how the model was unwrapped rather than of the reduction |
 | `floor` | `int` | the fewest triangles any reduction can reach: one per open piece, four per closed one. A lower bound from the pieces alone; handles and seams push the real floor above it |
 | `reducible` | `float` | the share of the triangles a reduction could in principle remove. One for a model nothing stops, near zero for a canopy of leaf cards |
 

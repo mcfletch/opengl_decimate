@@ -39,6 +39,7 @@ __all__ = [
     'VertexClass',
     'Topology',
     'build',
+    'atlas_charts',
     'components',
     'smoothing_groups',
     'weld_positions',
@@ -550,6 +551,38 @@ def smoothing_groups(
             keep &= meeting >= math.cos(math.radians(crease_angle))
         links_from, links_to = links_from[keep], links_to[keep]
     return _connected(links_from, links_to, count=faces.size)
+
+
+def atlas_charts(faces: IndexArray, corners: IndexArray, texcoords: FloatArray) -> IndexArray:
+    """Which piece of the texture atlas each face is laid out in.
+
+    A chart is a connected region of the surface that was unwrapped as one, and
+    a texture coordinate is only meaningful inside one of them: across a chart
+    boundary the two sides are at unrelated places in the image. So the faces
+    are joined across every interior edge whose two sides agree on where they
+    are in the texture, and labelled by connected component.
+
+    What that measures is how far a model can be reduced before its texture
+    stops being able to describe it. An output triangle covering more surface
+    than a chart holds has no coordinate that fits it, whatever a reducer does
+    with the ones it inherited.
+    """
+    if not len(faces):
+        return np.zeros(0, dtype=np.int64)
+    own = np.arange(len(faces), dtype=np.int64) * 3
+    # A face is never cut: its own three corners are always one chart.
+    inner_from = np.concatenate([own, own + 1])
+    inner_to = np.concatenate([own + 1, own + 2])
+    here, there = _paired_half_edges(faces)
+    at = np.asarray(texcoords, dtype='d').reshape(len(np.asarray(texcoords)), -1)
+    at = at[np.asarray(corners, dtype=np.int64).reshape(-1)]
+    shared = np.all(at[here] == at[there], axis=1)
+    labels = _connected(
+        np.concatenate([inner_from, here[shared]]),
+        np.concatenate([inner_to, there[shared]]),
+        count=faces.size,
+    )
+    return labels[own]
 
 
 def _face_normals(positions: FloatArray, faces: IndexArray) -> FloatArray:

@@ -138,36 +138,6 @@ SUBJECTS = (
         ),
     ),
     Subject(
-        slug='ruffs',
-        title='Lekking ruffs',
-        source='tmp/lekking_ruffs.glb',
-        credit=(
-            "'Lekking ruffs', inventory MP 045, from the Krystyna and Włodzimierz Tomek "
-            'Natural Science Museum in Ciężkowice, Poland. Digitised by the Regional '
-            'Digitalisation Lab, Małopolska Institute of Culture in Kraków, for the '
-            '[Virtual Museums of Małopolska]'
-            '(https://muzea.malopolska.pl/en/objects-list/2250) project, CC0'
-        ),
-        rotation=135.0,
-        note=(
-            'A museum scan exported as twenty-five primitives, each stopping at the '
-            '65,535 vertices a 16-bit index can name -- so the reduction sees one '
-            'surface only because the primitives are merged and welded first. Nine '
-            'of its thirteen components are specks the photogrammetry left behind, '
-            'and `drop_components_below` takes them: 572 triangles, which is fifteen '
-            'per cent of what the coarsest rung has to spend.\n\n'
-            'A third of its edges are on a texture chart boundary, which is what '
-            'this subject has to say. `lock_seams` would hold every one of them and '
-            'stop the chain at 57,503 triangles -- a level no game would draw, and '
-            'no chain at all. So it is reduced without, and what that costs is '
-            'visible above: by the coarse rungs each triangle samples several times '
-            'the texture it should, and the feathers go with it. An atlas cut into '
-            'thousands of small charts is a modelling decision that a decimator '
-            'cannot undo. See **Where a chain stops** below.'
-        ),
-        drop_components_below=0.01,
-    ),
-    Subject(
         slug='rocks',
         title='Coastal land rocks',
         source='polyhaven:coast_land_rocks_02',
@@ -255,6 +225,10 @@ class Reduction:
     #: level of detail's distances are measured in and what the framing of a
     #: slab gets wrong.
     seen_radius: float = 1.0
+    #: What `opengl_decimate.survey` says about the source: the pieces, the
+    #: handles, the seams, and how finely the texture atlas is cut.
+    charts: int = 0
+    texture_floor: int = 0
     #: Connected pieces the welded source is in, handles through them, and the
     #: share of its edges an atlas seam holds -- see :func:`shape_of`. Between
     #: them they say where a floor comes from.
@@ -500,6 +474,13 @@ def reduce_subject(subject: Subject, certify: bool) -> Reduction:
         groups=groups,
     )
     out.pieces, out.handles, out.seam_share = shape_of(groups)
+    # The atlas is a property of the whole model, and the group that carries
+    # most of it decides whether a level's texture can still describe it.
+    from opengl_decimate import survey as surveying
+
+    biggest = max(grouped, key=lambda group: len(group[2]))
+    read = surveying(biggest[1], biggest[2])
+    out.charts, out.texture_floor = read.charts, read.texture_floor
     out.seen_radius = view_radius(whole, centre, math.radians(subject.rotation))
 
     for index, (count, note) in enumerate(ladder(source_triangles)):
@@ -1076,26 +1057,34 @@ def closing(reductions: list) -> list:
         ' option in this package will remove one: closing a tunnel is a'
         ' different operation from contracting an edge.',
         '',
-        '**Seams.** A reduction crosses the boundary of a texture chart without'
-        ' tearing it -- each side keeps reading from its own chart -- but the'
-        ' coordinate a seam carries slides as the merged point moves, so a model'
-        ' that is mostly seam is a model whose texture drifts as it coarsens.'
-        ' `lock_seams` refuses those contractions, at the price of the triangles'
-        ' the seam network needs. The share of edges on a seam is what says'
-        ' whether that price is worth paying.',
+        '**The atlas.** A texture coordinate means something only inside one'
+        ' chart -- one connected piece of surface that was unwrapped as one --'
+        ' so a triangle covering more surface than a chart holds has no'
+        ' coordinate that fits it. The reduction still runs, and what it draws'
+        ' is a smear of whatever the atlas holds nearby. `survey` reports the'
+        ' count and the **texture floor** it implies, and that floor is a'
+        ' property of how the model was unwrapped rather than of the reducer: no'
+        ' option here moves it, and re-cutting the atlas is what does.'
+        ' How visible that is depends on how much of the model the small charts cover: an atlas of a few large charts and a handful of small ones loses only the handful, which is why the cliff and the rocks still read below the floor quoted for them. An atlas whose charts are *uniformly* small has nowhere to hide, and that is the case worth measuring for.'
+        '\n\nA museum scan of lekking ruffs was a subject on this page until'
+        ' its atlas was measured: 405,540 triangles across 2,549 charts, a'
+        ' median of 88 triangles each, which puts its floor at 15,020. It draws'
+        ' correctly at 32,000 and wears the ground texture at 8,000, and no'
+        ' chain a game would ship fits in between.',
         '',
     ]
     out += [
-        '| Subject | Pieces | Handles | Edges held by a seam | Floor |',
-        '|---|---:|---:|---:|---:|',
+        '| Subject | Pieces | Handles | Atlas charts | Texture floor | Floor |',
+        '|---|---:|---:|---:|---:|---:|',
     ]
     out += [
-        '| %s | %s | %s | %.1f%% | %s |'
+        '| %s | %s | %s | %s | %s tri | %s |'
         % (
             r.subject.title,
             f'{r.pieces:,}',
             f'{r.handles:,}',
-            100.0 * r.seam_share,
+            f'{r.charts:,}',
+            f'{r.texture_floor:,}',
             where_it_stopped(r),
         )
         for r in reductions

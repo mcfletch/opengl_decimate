@@ -13,11 +13,12 @@ condition preserves topology by construction, which is what it is for. A scan of
 feathers or lace arrives with hundreds and each costs the triangles it takes to
 go round it.
 
-**Seams.** ``seam_share`` is how much of the model is the boundary of a texture
-chart. It is not a floor on its own -- a reduction crosses seams without tearing
-them, keeping each side reading from its own chart -- but it says what
-``lock_seams`` would cost, and a model that is mostly seam is one whose texture
-slides as it coarsens.
+**The atlas.** A texture coordinate means something only inside one chart -- one
+connected piece of surface that was unwrapped as one -- so a triangle covering
+more surface than a chart holds has no coordinate that fits it, and what gets
+drawn is a smear of whatever the atlas holds nearby. ``charts`` counts them and
+``texture_floor`` is the triangle count that implies. ``seam_share`` is the same
+property seen from the edges, and says what ``lock_seams`` would cost.
 
 :func:`survey` measures all three and puts a floor on what any reduction can
 reach. A caller who finds that floor near the triangle count they started with
@@ -69,6 +70,12 @@ class Survey:
     #: coordinates -- the boundary of the texture atlas, and what ``lock_seams``
     #: refuses. Zero for a mesh carrying no texture coordinates.
     seam_share: float
+    #: Pieces the texture atlas is cut into. Zero for a mesh carrying no
+    #: texture coordinates, which has no atlas to measure.
+    charts: int = 0
+    #: Triangles in the middle chart, and in the smaller quarter of them.
+    median_chart: int = 0
+    small_chart: int = 0
 
     @property
     def floor(self) -> int:
@@ -80,6 +87,30 @@ class Survey:
         turns into a triangle count a caller could rely on.
         """
         return self.open_pieces + 4 * (self.pieces - self.open_pieces)
+
+    @property
+    def texture_floor(self) -> int:
+        """Below this many triangles the model's texture stops describing it.
+
+        A texture coordinate means something only inside one chart, so a
+        triangle covering more surface than a chart holds has no coordinate that
+        fits it -- the reduction still works, and what it draws is a smear of
+        whatever the atlas happens to hold nearby.
+
+        The estimate is the triangle count at which one output triangle grows to
+        the size of a chart in the *smaller quarter* of them: past that, a
+        quarter of the model is being drawn from charts too small to describe
+        it. Zero where there is no atlas to run out of.
+
+        How visible that is depends on how much of the surface those small
+        charts cover. An atlas of a few large charts and a handful of small ones
+        loses only the handful, and reads well below the figure; one whose
+        charts are *uniformly* small has nowhere to hide. Compare the floor with
+        ``median_chart`` to tell those apart.
+        """
+        if not self.small_chart:
+            return 0
+        return (self.triangles - self.welded_away) // self.small_chart
 
     @property
     def reducible(self) -> float:
@@ -147,6 +178,17 @@ def survey(attributes: AttributeMap, indices: IndexArray) -> Survey:
     )
     held = float(np.count_nonzero(copies[edges[:, 0]] != copies[edges[:, 1]]))
 
+    mapped = next(
+        (value for name, value in attributes.items() if name.startswith('TEXCOORD')), None
+    )
+    charts = median_chart = small_chart = 0
+    if mapped is not None:
+        per_face = topology.atlas_charts(faces, mesh.corners, mapped)
+        _, held_by = np.unique(per_face, return_counts=True)
+        charts = len(held_by)
+        median_chart = int(np.median(held_by))
+        small_chart = max(1, int(np.percentile(held_by, 25)))
+
     return Survey(
         triangles=mesh.input_faces,
         points=len(mesh.positions),
@@ -156,4 +198,7 @@ def survey(attributes: AttributeMap, indices: IndexArray) -> Survey:
         largest_piece=int(sizes.max()),
         handles=int(handles.sum()),
         seam_share=held / len(edges),
+        charts=charts,
+        median_chart=median_chart,
+        small_chart=small_chart,
     )

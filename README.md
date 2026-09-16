@@ -27,15 +27,14 @@ NumPy is the only dependency.
 
 ## What it does to a scan
 
-`coastal_cliff_04`, 1,537,926 triangles of photogrammetry, decimated **once** in 11.3 s -- every level below is a prefix of that one recording replayed.
+`coastal_cliff_04`, 1,537,926 triangles of photogrammetry, decimated **once** in 11.2 s -- every level below is a prefix of that one recording replayed.
 
 <table><tr><td align="center"><img src="https://raw.githubusercontent.com/mcfletch/opengl_decimate/main/docs/gallery/cliff-l0-shaded.png" width="190" alt="Coastal cliff at 1,537,926 triangles"><br><sub><b>1,537,926</b> tri</sub></td><td align="center"><img src="https://raw.githubusercontent.com/mcfletch/opengl_decimate/main/docs/gallery/cliff-l1-shaded.png" width="190" alt="Coastal cliff at 32,000 triangles"><br><sub><b>32,000</b> tri</sub></td><td align="center"><img src="https://raw.githubusercontent.com/mcfletch/opengl_decimate/main/docs/gallery/cliff-l2-shaded.png" width="190" alt="Coastal cliff at 8,000 triangles"><br><sub><b>8,000</b> tri</sub></td><td align="center"><img src="https://raw.githubusercontent.com/mcfletch/opengl_decimate/main/docs/gallery/cliff-l3-shaded.png" width="190" alt="Coastal cliff at 4,000 triangles"><br><sub><b>4,000</b> tri</sub></td></tr></table>
 
 | Subject | Source | Reduced in | Draw at source | Finest shipped | Draw there |
 |---|---:|---:|---:|---:|---:|
-| Coastal cliff | 1,537,926 tri | 11.3 s | 0.19 ms | 32,000 tri | 0.04 ms |
-| Lekking ruffs | 547,647 tri | 6.3 s | 0.22 ms | 32,000 tri | 0.10 ms |
-| Coastal land rocks | 1,291,146 tri | 9.6 s | 0.17 ms | 32,000 tri | 0.04 ms |
+| Coastal cliff | 1,537,926 tri | 11.2 s | 0.20 ms | 32,000 tri | 0.04 ms |
+| Coastal land rocks | 1,291,146 tri | 9.5 s | 0.17 ms | 32,000 tri | 0.04 ms |
 | Marble bust | 17,456 tri | 0.1 s | 0.04 ms | 17,456 tri | 0.04 ms |
 
 [**docs/GALLERY.md**](docs/GALLERY.md) has every level of every subject, each drawn from touching distance out to barely visible, with what it cost to make and what it costs to draw.
@@ -104,8 +103,10 @@ number a level of detail's error bound should be built on, and runs about twice
 cannot be decimated, and the reason is always a property of the mesh: a canopy
 of separate leaf cards is as many pieces as it has cards and every piece keeps a
 triangle; lace has a handle through every hole, and no contraction closes one;
-an atlas of thousands of small charts is mostly seam. `survey` measures all
-three and puts a floor on what any target can reach.
+and a texture coordinate means something only inside one chart of the atlas, so
+a model unwrapped into thousands of small ones runs out of texture long before
+it runs out of triangles. `survey` measures all of it and puts a floor on what
+any target can reach.
 
 ```python
 from opengl_decimate import survey
@@ -113,6 +114,7 @@ from opengl_decimate import survey
 report = survey(attributes, indices)
 report.pieces, report.handles, report.seam_share
 report.floor                                 # no target goes below this
+report.charts, report.texture_floor          # and below this the texture stops fitting
 if report.reducible < 0.5:
     ...  # this model wants a different operation, not a lower target
 ```
