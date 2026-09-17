@@ -42,18 +42,18 @@ A photogrammetry scan of rock. There is no flat region to spend the first millio
 |---|---|
 | Source | 1,537,926 triangles, 789,032 vertices, 1 primitive over 1 material |
 | Welded to | 771,255 points |
-| Reduced in | 11.1 s, 771,249 contractions |
+| Reduced in | 10.7 s, 771,249 contractions |
 | Credit | 'Coastal Cliff 04' by Rob Tuytel and Rico Cilliers, from [Poly Haven](https://polyhaven.com/a/coastal_cliff_04), CC0 |
 
 | Triangles | Of source | `result.error` | Measured | Replay | Draw | Frame rate | One pixel past | Outline | Shading |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1,537,926 *(the source, for reference)* | source | 0.00000 | -- | 2278 ms | 0.20 ms | 5,025 | -- | -- | -- |
-| 32,000 *(the finest a game would ship)* | 2.1% | 0.04059 | 0.10510 | 146 ms | 0.04 ms | 24,478 | 0.0 r | 0.62% | 60.7% |
-| 8,000 | 0.52% | 0.10042 | 0.21058 | 73 ms | 0.04 ms | 26,393 | 0.4 r | 1.37% | 68.6% |
-| 4,000 | 0.26% | 0.15330 | 0.48983 | 56 ms | 0.04 ms | 24,711 | 2.4 r | 1.93% | 72.1% |
-| 2,000 | 0.13% | 0.23028 | 0.68114 | 60 ms | 0.04 ms | 25,082 | 3.7 r | 3.23% | 74.9% |
-| 999 | 0.06% | 0.34224 | 1.19127 | 56 ms | 0.04 ms | 24,460 | 7.2 r | 8.85% | 72.6% |
-| 500 *(past here, an imposter)* | 0.03% | 0.49727 | 1.82888 | 46 ms | 0.04 ms | 26,661 | 11.6 r | 10.00% | 70.0% |
+| 1,537,926 *(the source, for reference)* | source | 0.00000 | -- | 2256 ms | 0.20 ms | 5,045 | -- | -- | -- |
+| 32,000 *(the finest a game would ship)* | 2.1% | 0.04059 | 0.10510 | 116 ms | 0.04 ms | 24,008 | 0.0 r | 0.62% | 60.7% |
+| 8,000 | 0.52% | 0.10042 | 0.21058 | 62 ms | 0.04 ms | 24,809 | 0.4 r | 1.37% | 68.6% |
+| 4,000 | 0.26% | 0.15330 | 0.48983 | 54 ms | 0.04 ms | 27,042 | 2.4 r | 1.93% | 72.1% |
+| 2,000 | 0.13% | 0.23028 | 0.68114 | 53 ms | 0.04 ms | 27,142 | 3.7 r | 3.23% | 74.9% |
+| 999 | 0.06% | 0.34224 | 1.19127 | 46 ms | 0.04 ms | 25,658 | 7.2 r | 8.85% | 72.6% |
+| 500 *(past here, an imposter)* | 0.03% | 0.49727 | 1.82888 | 48 ms | 0.04 ms | 27,737 | 11.6 r | 10.00% | 70.0% |
 
 <table>
 <tr><th align="left">Level</th><th align="left">Close up</th><th align="left">Where it is used</th><th align="left">Its triangles</th></tr>
@@ -70,26 +70,35 @@ A photogrammetry scan of rock. There is no flat region to spend the first millio
 
 A museum scan exported as twenty-five primitives, each stopping at the 65,535 vertices a 16-bit index can name -- so the reduction sees one surface only because the primitives are merged and welded first. Nine of its thirteen components are specks the photogrammetry left behind, and `drop_components_below` takes them: 572 triangles.
 
-The chain stops at 32,000 for a reason that belongs to the unwrap rather than to the reduction. An unwrap cuts the surface into islands and lays them flat on the image, duplicating the vertices along each cut -- so every vertex belongs to exactly one island, and a triangle samples the right part of the image only while all three of its corners are in the same one. A contraction across a cut leaves a triangle whose three coordinates point at three unrelated places in the atlas, and what it draws is the stripe between them.
+It is also the subject here that runs into its **texture floor**, and the one that shows what to do about it. An unwrap cuts the surface into islands and lays them flat on the image, duplicating the vertices along each cut -- so every vertex belongs to exactly one island, and a triangle samples the right part of the image only while all three of its corners are in the same one. A contraction across a cut leaves a triangle whose three coordinates point at three unrelated places in the atlas, and what it draws is the stripe between them.
 
-This model is cut into 2,549 islands of 88 triangles apiece, so there is very little room before a triangle is bigger than an island. Counted: 17% of its triangles span more than one island at 32,000, 58% at 8,000 and 80% at 4,000 -- against 2% for the coastal cliff at 8,000 and 0.04% for the marble bust. What the birds wear below 32,000 is the ground they are standing on, because that is what is laid out next to them in the image. The geometry is unharmed and no option here helps: the fix is a coarser unwrap, which is a modelling job.
+This model is cut into 2,549 islands of 88 triangles apiece, so there is very little room before a triangle is bigger than an island. Counted: 17% of its triangles span more than one island at 32,000, 58% at 8,000 and 80% at 4,000 -- against 2% for the coastal cliff at 8,000 and 0.04% for the marble bust. Carrying the published coordinates down that chain dresses the birds in the ground they are standing on, because that is what is laid out next to them in the image.
+
+No reducer mends that -- the fault is in the unwrap and a reducer can only carry the coordinates it was given -- so the levels below are not carrying them. Each is unwrapped afresh into charts made of whole triangles, and the scan is baked into the result: every texel of the new atlas is projected onto the original, and base colour, roughness and normals are read there. A normal map goes through the frame its texture coordinates define, so the directions are turned into the new frame rather than copied. That is `OpenGLContext_editor.assets.rewrap`, and it is what a scan pipeline does at this point.
 
 | | |
 |---|---|
 | Source | 547,647 triangles, 1,601,690 vertices, 25 primitives over 2 materials |
 | Welded to | 273,414 points |
-| Reduced in | 6.3 s, 271,735 contractions |
+| Reduced in | 5.3 s, 271,735 contractions |
+| Floor | 3,614 triangles, where no contraction is left that keeps the surface a surface |
 | Credit | 'Lekking ruffs', inventory MP 045, from the Krystyna and Włodzimierz Tomek Natural Science Museum in Ciężkowice, Poland. Digitised by the Regional Digitalisation Lab, Małopolska Institute of Culture in Kraków, for the [Virtual Museums of Małopolska](https://muzea.malopolska.pl/en/objects-list/2250) project, CC0 |
 
 | Triangles | Of source | `result.error` | Measured | Replay | Draw | Frame rate | One pixel past | Outline | Shading |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 547,075 *(the source, for reference)* | source | 0.00000 | -- | 939 ms | 0.24 ms | 4,158 | -- | -- | -- |
-| 32,000 *(the last its texture describes)* | 5.8% | 0.00120 | 0.00542 | 114 ms | 0.07 ms | 13,485 | 3.3 r | 1.57% | 55.0% |
+| 547,075 *(the source, for reference)* | source | 0.00000 | -- | 887 ms | 0.21 ms | 4,780 | -- | -- | -- |
+| 32,000 *(the finest a game would ship)* | 5.8% | 0.00120 | 0.00542 | 112 ms | 0.06 ms | 17,362 | 3.3 r | 1.57% | 55.0% |
+| 8,000 | 1.5% | 0.00452 | 0.02933 | 49 ms | 0.04 ms | 26,080 | 22.1 r | 4.44% | 57.0% |
+| 4,542 | 0.83% | 0.05172 | 0.07872 | 39 ms | 0.04 ms | 24,217 | 60.9 r | 11.29% | 72.6% |
+| 3,614 | 0.66% | 0.05172 | 0.14003 | 37 ms | 0.04 ms | 26,435 | 109.1 r | 17.74% | 71.0% |
 
 <table>
 <tr><th align="left">Level</th><th align="left">Close up</th><th align="left">Where it is used</th><th align="left">Its triangles</th></tr>
 <tr><td valign="top" width="140"><b>547,075</b> tri<br><sub><b>the source, for reference</b><br>the source, drawn where the finest level is</sub></td><td><img src="gallery/ruffs-l0-shaded.png" width="250" alt="Lekking ruffs at 547,075 triangles"></td><td><img src="gallery/ruffs-l0-served.png" width="250" alt="Lekking ruffs at 547,075 triangles, 0.2 radii away"></td><td><img src="gallery/ruffs-l0-edges.png" width="250" alt="547,075 triangles of Lekking ruffs"></td></tr>
-<tr><td valign="top" width="140"><b>32,000</b> tri<br><sub><b>the last its texture describes</b><br>one pixel of error past <b>3.3 radii</b><br>drawn there; outline 1.57%, shading 55.0%</sub></td><td><img src="gallery/ruffs-l1-shaded.png" width="250" alt="Lekking ruffs at 32,000 triangles"></td><td><img src="gallery/ruffs-l1-served.png" width="250" alt="Lekking ruffs at 32,000 triangles, 0.2 radii away"></td><td><img src="gallery/ruffs-l1-edges.png" width="250" alt="32,000 triangles of Lekking ruffs"></td></tr>
+<tr><td valign="top" width="140"><b>32,000</b> tri<br><sub><b>the finest a game would ship</b><br>one pixel of error past <b>3.3 radii</b><br>drawn there; outline 1.57%, shading 55.0%</sub></td><td><img src="gallery/ruffs-l1-shaded.png" width="250" alt="Lekking ruffs at 32,000 triangles"></td><td><img src="gallery/ruffs-l1-served.png" width="250" alt="Lekking ruffs at 32,000 triangles, 0.2 radii away"></td><td><img src="gallery/ruffs-l1-edges.png" width="250" alt="32,000 triangles of Lekking ruffs"></td></tr>
+<tr><td valign="top" width="140"><b>8,000</b> tri<br><sub>one pixel of error past <b>22.1 radii</b><br>drawn there; outline 4.44%, shading 57.0%</sub></td><td><img src="gallery/ruffs-l2-shaded.png" width="250" alt="Lekking ruffs at 8,000 triangles"></td><td><img src="gallery/ruffs-l2-served.png" width="250" alt="Lekking ruffs at 8,000 triangles, 22.1 radii away"></td><td><img src="gallery/ruffs-l2-edges.png" width="250" alt="8,000 triangles of Lekking ruffs"></td></tr>
+<tr><td valign="top" width="140"><b>4,542</b> tri<br><sub>one pixel of error past <b>60.9 radii</b><br>drawn there; outline 11.29%, shading 72.6%</sub></td><td><img src="gallery/ruffs-l3-shaded.png" width="250" alt="Lekking ruffs at 4,542 triangles"></td><td><img src="gallery/ruffs-l3-served.png" width="250" alt="Lekking ruffs at 4,542 triangles, 32.0 radii away"></td><td><img src="gallery/ruffs-l3-edges.png" width="250" alt="4,542 triangles of Lekking ruffs"></td></tr>
+<tr><td valign="top" width="140"><b>3,614</b> tri<br><sub>one pixel of error past <b>109.1 radii</b><br>drawn there; outline 17.74%, shading 71.0%</sub></td><td><img src="gallery/ruffs-l4-shaded.png" width="250" alt="Lekking ruffs at 3,614 triangles"></td><td><img src="gallery/ruffs-l4-served.png" width="250" alt="Lekking ruffs at 3,614 triangles, 32.0 radii away"></td><td><img src="gallery/ruffs-l4-edges.png" width="250" alt="3,614 triangles of Lekking ruffs"></td></tr>
 </table>
 
 ## Coastal land rocks
@@ -100,18 +109,18 @@ Several separate boulders in one mesh, so the reduction has to spend across them
 |---|---|
 | Source | 1,291,146 triangles, 662,707 vertices, 1 primitive over 1 material |
 | Welded to | 647,007 points |
-| Reduced in | 9.5 s, 646,979 contractions |
+| Reduced in | 9.0 s, 646,979 contractions |
 | Credit | 'Coast Land Rocks 02' by Rob Tuytel and Rico Cilliers, from [Poly Haven](https://polyhaven.com/a/coast_land_rocks_02), CC0 |
 
 | Triangles | Of source | `result.error` | Measured | Replay | Draw | Frame rate | One pixel past | Outline | Shading |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1,291,146 *(the source, for reference)* | source | 0.00000 | -- | 2705 ms | 0.18 ms | 5,688 | -- | -- | -- |
-| 32,000 *(the finest a game would ship)* | 2.5% | 0.00981 | 0.02428 | 109 ms | 0.05 ms | 21,219 | 0.4 r | 0.93% | 64.5% |
-| 7,999 | 0.62% | 0.02303 | 0.05760 | 54 ms | 0.04 ms | 24,870 | 2.4 r | 3.51% | 70.6% |
-| 3,999 | 0.31% | 0.03422 | 0.07442 | 44 ms | 0.04 ms | 26,176 | 3.4 r | 4.99% | 69.4% |
-| 1,999 | 0.15% | 0.04964 | 0.13543 | 40 ms | 0.04 ms | 26,512 | 7.0 r | 9.57% | 69.9% |
-| 999 | 0.08% | 0.07210 | 0.19508 | 38 ms | 0.05 ms | 22,125 | 10.5 r | 11.83% | 75.3% |
-| 500 *(past here, an imposter)* | 0.04% | 0.10611 | 0.31521 | 37 ms | 0.04 ms | 24,261 | 17.5 r | 12.50% | 70.0% |
+| 1,291,146 *(the source, for reference)* | source | 0.00000 | -- | 2648 ms | 0.17 ms | 5,944 | -- | -- | -- |
+| 32,000 *(the finest a game would ship)* | 2.5% | 0.00981 | 0.02428 | 106 ms | 0.04 ms | 24,427 | 0.4 r | 0.93% | 64.5% |
+| 7,999 | 0.62% | 0.02303 | 0.05760 | 52 ms | 0.04 ms | 24,948 | 2.4 r | 3.51% | 70.6% |
+| 3,999 | 0.31% | 0.03422 | 0.07442 | 43 ms | 0.04 ms | 24,077 | 3.4 r | 4.99% | 69.4% |
+| 1,999 | 0.15% | 0.04964 | 0.13543 | 39 ms | 0.04 ms | 26,561 | 7.0 r | 9.57% | 69.9% |
+| 999 | 0.08% | 0.07210 | 0.19508 | 38 ms | 0.04 ms | 26,417 | 10.5 r | 11.83% | 75.3% |
+| 500 *(past here, an imposter)* | 0.04% | 0.10611 | 0.31521 | 37 ms | 0.04 ms | 26,463 | 17.5 r | 12.50% | 70.0% |
 
 <table>
 <tr><th align="left">Level</th><th align="left">Close up</th><th align="left">Where it is used</th><th align="left">Its triangles</th></tr>
@@ -137,12 +146,12 @@ Small enough to read every triangle, and a face is where an error is obvious.
 
 | Triangles | Of source | `result.error` | Measured | Replay | Draw | Frame rate | One pixel past | Outline | Shading |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 17,456 *(the source, for reference)* | source | 0.00000 | -- | 19 ms | 0.04 ms | 26,060 | -- | -- | -- |
-| 8,000 *(the finest a game would ship)* | 45.8% | 0.00026 | 0.00074 | 14 ms | 0.04 ms | 24,775 | 0.0 r | 0.04% | 5.2% |
-| 4,000 | 22.9% | 0.00055 | 0.00153 | 8 ms | 0.04 ms | 26,905 | 0.7 r | 0.24% | 15.9% |
-| 2,000 | 11.5% | 0.00098 | 0.00427 | 4 ms | 0.04 ms | 25,928 | 3.8 r | 0.62% | 30.7% |
-| 1,000 | 5.7% | 0.00172 | 0.00468 | 3 ms | 0.04 ms | 27,234 | 4.2 r | 1.51% | 45.8% |
-| 500 *(past here, an imposter)* | 2.9% | 0.00292 | 0.00940 | 2 ms | 0.04 ms | 27,205 | 9.5 r | 1.92% | 53.3% |
+| 17,456 *(the source, for reference)* | source | 0.00000 | -- | 18 ms | 0.04 ms | 26,865 | -- | -- | -- |
+| 8,000 *(the finest a game would ship)* | 45.8% | 0.00026 | 0.00074 | 14 ms | 0.04 ms | 26,362 | 0.0 r | 0.04% | 5.2% |
+| 4,000 | 22.9% | 0.00055 | 0.00153 | 8 ms | 0.04 ms | 26,446 | 0.7 r | 0.24% | 15.9% |
+| 2,000 | 11.5% | 0.00098 | 0.00427 | 4 ms | 0.04 ms | 25,174 | 3.8 r | 0.62% | 30.7% |
+| 1,000 | 5.7% | 0.00172 | 0.00468 | 3 ms | 0.04 ms | 27,264 | 4.2 r | 1.51% | 45.8% |
+| 500 *(past here, an imposter)* | 2.9% | 0.00292 | 0.00940 | 4 ms | 0.04 ms | 25,368 | 9.5 r | 1.92% | 53.3% |
 
 <table>
 <tr><th align="left">Level</th><th align="left">Close up</th><th align="left">Where it is used</th><th align="left">Its triangles</th></tr>
@@ -164,14 +173,16 @@ Some subjects above run out of ladder before they run out of rungs. A reduction 
 
 **The atlas.** A texture coordinate means something only inside one chart -- one connected piece of surface that was unwrapped as one -- so a triangle covering more surface than a chart holds has no coordinate that fits it. The reduction still runs, and what it draws is a smear of whatever the atlas holds nearby. `survey` reports the count and the **texture floor** it implies, and that floor is a property of how the model was unwrapped rather than of the reducer: no option here moves it, and re-cutting the atlas is what does. How visible that is depends on how much of the model the small charts cover: an atlas of a few large charts and a handful of small ones loses only the handful, which is why the cliff and the rocks still read below the floor quoted for them. An atlas whose charts are *uniformly* small has nowhere to hide, and that is the case worth measuring for.
 
-The lekking ruffs is the subject on this page that runs into it: 405,540 triangles across 2,549 charts, a median of 88 triangles each, which puts its floor at 15,020. Its ladder stops at 32,000 for that reason and not for any the reduction has -- at 8,000 the geometry is still a fair bird and the texture on it is the ground.
+The lekking ruffs is the subject on this page that runs into it: 405,540 triangles across 2,549 charts, a median of 88 triangles each, which puts its floor at 15,020 -- so carrying the published coordinates to 8,000 leaves a fair bird wearing the ground it stands on. Its levels here are unwrapped afresh instead, and the scan baked into the result, which is the operation that moves a texture floor: `OpenGLContext_editor.assets.rewrap`. It costs a bake per level and belongs to the authoring step rather than to the reduction -- the reduction is unchanged, and the sequence recorded for it is the same one.
 
 | Subject | Pieces | Handles | Atlas charts | Texture floor | Floor |
 |---|---:|---:|---:|---:|---:|
 | Coastal cliff | 3 | 1 | 143 | 1,405 tri | reached the bottom of the chain |
-| Lekking ruffs | 4 | 201 | 2,549 | 15,020 tri | 32,000 tri, past which it samples across its atlas |
+| Lekking ruffs | 4 | 201 | 2,549 | 15,020 tri | 3,614 tri |
 | Coastal land rocks | 1 | 5 | 186 | 4,611 tri | reached the bottom of the chain |
 | Marble bust | 1 | 0 | 24 | 49 tri | reached the bottom of the chain |
+
+A subject that stops is not a subject the reducer gave up on: every contraction left would have cost the model one of the three properties above. What such an asset needs is a different operation -- an imposter, a re-authored atlas, foliage baked to larger cards -- rather than a lower target.
 
 ## What this box is
 

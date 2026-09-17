@@ -17,6 +17,10 @@ levels through **OpenGLContext**, and fetches the CC0 subjects through
 in the workspace it is developed in, and neither is imported by anything a user
 installs.
 
+A subject marked ``rewrap`` additionally wants ``OpenGLContext-editor[rewrap]``,
+which brings the unwrapper a per-level atlas is laid out with. That import is
+made where it is used, so the rest of the page builds without it.
+
 The subjects are CC0. :data:`SUBJECTS` records where each came from and who made
 it, and :func:`credits` writes that into the page -- CC0 asks for none of it, and
 it costs a line.
@@ -124,6 +128,11 @@ class Subject:
     #: `survey`'s texture floor. Drawing the levels below it would be publishing
     #: a picture of the model's unwrap, which the reduction cannot help.
     stop_below: int = 0
+    #: Give every level below the source an atlas of its own, baked from the
+    #: original -- for a subject whose published unwrap is finer than the levels
+    #: made from it, which is the other answer to the floor `stop_below` names.
+    #: Costs a bake per level and asks for `xatlas`.
+    rewrap: bool = False
 
 
 SUBJECTS = (
@@ -160,10 +169,10 @@ SUBJECTS = (
             'surface only because the primitives are merged and welded first. Nine '
             'of its thirteen components are specks the photogrammetry left behind, '
             'and `drop_components_below` takes them: 572 triangles.\n\n'
-            'The chain stops at 32,000 for a reason that belongs to the unwrap '
-            'rather than to the reduction. An unwrap cuts the surface into islands '
-            'and lays them flat on the image, duplicating the vertices along each '
-            'cut -- so every vertex belongs to exactly one island, and a triangle '
+            'It is also the subject here that runs into its **texture floor**, and '
+            'the one that shows what to do about it. An unwrap cuts the surface into '
+            'islands and lays them flat on the image, duplicating the vertices along '
+            'each cut -- so every vertex belongs to exactly one island, and a triangle '
             'samples the right part of the image only while all three of its corners '
             'are in the same one. A contraction across a cut leaves a triangle whose '
             'three coordinates point at three unrelated places in the atlas, and what '
@@ -172,13 +181,22 @@ SUBJECTS = (
             'very little room before a triangle is bigger than an island. Counted: '
             '17% of its triangles span more than one island at 32,000, 58% at 8,000 '
             'and 80% at 4,000 -- against 2% for the coastal cliff at 8,000 and 0.04% '
-            'for the marble bust. What the birds wear below 32,000 is the ground they '
-            'are standing on, because that is what is laid out next to them in the '
-            'image. The geometry is unharmed and no option here helps: the fix is a '
-            'coarser unwrap, which is a modelling job.'
+            'for the marble bust. Carrying the published coordinates down that chain '
+            'dresses the birds in the ground they are standing on, because that is '
+            'what is laid out next to them in the image.\n\n'
+            'No reducer mends that -- the fault is in the unwrap and a reducer can '
+            'only carry the coordinates it was given -- so the levels below are not '
+            'carrying them. Each is unwrapped afresh into charts made of whole '
+            'triangles, and the scan is baked into the result: every texel of the new '
+            'atlas is projected onto the original, and base colour, roughness and '
+            'normals are read there. A normal map goes through the frame its texture '
+            'coordinates define, so the directions are turned into the new frame '
+            'rather than copied. That is '
+            '`OpenGLContext_editor.assets.rewrap`, and it is what a scan pipeline '
+            'does at this point.'
         ),
         drop_components_below=0.01,
-        stop_below=32_000,
+        rewrap=True,
     ),
     Subject(
         slug='rocks',
@@ -241,6 +259,10 @@ class Level:
     shown_at: float = NEAREST
     note: str = ''
     images: dict = field(default_factory=dict)
+    #: What to draw instead of the replayed result, where the level was given an
+    #: atlas of its own: one ``Rewrapped`` per group. Empty otherwise, and the
+    #: replayed result is drawn directly.
+    rewrapped: list = field(default_factory=list)
 
 
 @dataclass
@@ -588,6 +610,14 @@ def reduce_subject(subject: Subject, certify: bool) -> Reduction:
             % (index, f'{triangles:,}', out.levels[-1].error, replay_ms),
             flush=True,
         )
+        if subject.rewrap and index:
+            start = time.perf_counter()
+            out.levels[-1].rewrapped, texels = rewrap_level(out, results)
+            print(
+                '      rewrapped: %s texels baked in %.1f s'
+                % (f'{texels:,}', time.perf_counter() - start),
+                flush=True,
+            )
     out.peak_mb = peak_rss_mb()
     return out
 
@@ -595,6 +625,119 @@ def reduce_subject(subject: Subject, certify: bool) -> Reduction:
 #: Which texture channels hold colour rather than measurements, and so are
 #: written as sRGB.
 COLOUR_CHANNELS = ('baseColor', 'emissive', 'sheenColor', 'specularColor')
+
+#: Pixels on a side of an atlas baked for a level. A level of a few thousand
+#: triangles has far less surface to describe than the scan it came from, so the
+#: source's eight-thousand-pixel maps are not what it needs.
+REWRAP_SIZE = 2048
+
+#: Maps that hold a direction in the frame the texture coordinates define,
+#: rather than a property of the surface at a point. A fresh unwrap turns that
+#: frame, so these are baked through ``rewrap.sample_normals``, which turns the
+#: directions with it. Every other map carries over as it stands.
+FRAME_BOUND_CHANNELS = ('normal', 'clearcoatNormal')
+
+
+@dataclass
+class Rewrapped:
+    """One group of one level, laid out in an atlas of its own."""
+
+    attributes: dict
+    indices: Any
+    material: Any
+
+
+@dataclass
+class Baked:
+    """A texture that is an image in hand rather than one read from a file."""
+
+    image: Any
+
+
+def rewrap_level(reduction: Reduction, results: list) -> tuple[list, int]:
+    """Give a level charts of its own, and bake the original into them.
+
+    A scan's published unwrap is cut for the dense mesh: thousands of small
+    charts, which distort least and are the right answer there. A level reduced
+    from it inherits those coordinates, and once one of its triangles covers
+    more surface than a chart holds, the triangle's three corners name three
+    unrelated places in the image. Unwrapping the level afresh removes the
+    possibility -- its charts are made of whole triangles -- and baking the
+    original into the result is what puts the model's own appearance back.
+
+    Returns the groups and how many texels were projected, which is what the
+    step costs.
+    """
+    import copy
+
+    from OpenGLContext_editor.assets import rewrap as rewrapping
+    from PIL import Image
+
+    out, texels = [], 0
+    for group, result in zip(reduction.groups, results, strict=True):
+        if not result.triangle_count or 'TEXCOORD_0' not in group.attributes:
+            out.append(Rewrapped(result.attributes, result.indices, group.material))
+            continue
+        laid = rewrapping.unwrap(
+            result.attributes['POSITION'], result.indices, size=REWRAP_SIZE
+        )
+        shot = rewrapping.project(
+            laid,
+            group.attributes['POSITION'],
+            group.indices,
+            group.attributes['TEXCOORD_0'],
+            size=REWRAP_SIZE,
+        )
+        texels += len(shot.spots)
+
+        # The frames a normal map is read against, and only where one is worth
+        # building: they cost a pass over both meshes.
+        wants_frames = any(
+            channel in FRAME_BOUND_CHANNELS and getattr(texture, 'image', None) is not None
+            for channel, texture in (getattr(group.material, 'textures', None) or {}).items()
+        )
+        onto = into = None
+        if wants_frames and 'NORMAL' in result.attributes:
+            onto = rewrapping.frames(
+                group.attributes['POSITION'],
+                group.indices,
+                group.attributes['TEXCOORD_0'],
+                group.attributes['NORMAL'],
+            )
+            into = rewrapping.frames(
+                laid.positions, laid.indices, laid.uv, result.attributes['NORMAL'][laid.source]
+            )
+
+        painted = {}
+        for channel, texture in (getattr(group.material, 'textures', None) or {}).items():
+            image = getattr(texture, 'image', None)
+            if image is None:
+                continue
+            if channel in FRAME_BOUND_CHANNELS:
+                if onto is None:
+                    continue
+                canvas = rewrapping.sample_normals(
+                    shot, np.asarray(image), onto, into, group.indices, laid.indices
+                )
+            else:
+                canvas = rewrapping.sample(shot, np.asarray(image))
+            if canvas.shape[2] == 1:
+                canvas = canvas[:, :, 0]
+            painted[channel] = Baked(image=Image.fromarray(canvas))
+        material = copy.copy(group.material)
+        material.textures = painted
+
+        # The unwrap splits a vertex wherever a chart boundary runs through it,
+        # so every attribute the level holds follows `source` onto the new one.
+        attributes = {
+            name: values[laid.source]
+            for name, values in result.attributes.items()
+            if name != 'TEXCOORD_0'
+        }
+        attributes['POSITION'] = laid.positions
+        attributes['TEXCOORD_0'] = laid.uv
+        out.append(Rewrapped(attributes, laid.indices, material))
+    return out, texels
 
 
 def externalise(material: Any, where: str, slug: str, seen: dict) -> Any:
@@ -610,8 +753,15 @@ def externalise(material: Any, where: str, slug: str, seen: dict) -> Any:
     eight-thousand-pixel map would otherwise leave a truncated file that every
     later run takes for a finished one -- and a texture that fails to load takes
     its whole primitive out of the picture.
+
+    A file is **named after what is in it**, so the cache cannot be wrong. A
+    name from a counter says only where a map came in the run that wrote it, and
+    a subject that bakes an atlas per level writes a different set each time its
+    ladder changes -- whereupon a later run finds the name and keeps the old
+    picture.
     """
     import copy
+    import hashlib
 
     from OpenGLContext.loaders.gltf.writer import ExternalImage
 
@@ -625,7 +775,9 @@ def externalise(material: Any, where: str, slug: str, seen: dict) -> Any:
         image = getattr(texture, 'image', None)
         if image is None:
             continue
-        name = '%s-%d-%s.png' % (slug, len(seen), channel)
+        pixels = np.asarray(image)
+        digest = hashlib.blake2b(np.ascontiguousarray(pixels), digest_size=8).hexdigest()
+        name = '%s-%s-%s.png' % (slug, channel, digest)
         path = os.path.join(where, name)
         if not os.path.exists(path):
             image.save(path + '.part', format='PNG')
@@ -642,18 +794,24 @@ def write_level(reduction: Reduction, level: Level, where: str) -> str:
     from OpenGLContext.loaders.gltf.writer import SceneNode, write_glb
     from OpenGLContext.scenegraph.pbrmesh import PBRMesh
 
+    # A rewrapped level is drawn from its own atlas and its own material; every
+    # other one is the replayed result wearing the group's material.
+    drawn = level.rewrapped or [
+        Rewrapped(result.attributes, result.indices, group.material)
+        for group, result in zip(reduction.groups, level.results, strict=True)
+    ]
     built = []
-    for group, result in zip(reduction.groups, level.results, strict=True):
-        if not result.triangle_count:
+    for piece in drawn:
+        if not len(piece.indices):
             continue
         built.append(
             PBRMesh(
-                positions=result.attributes['POSITION'],
-                normals=result.attributes.get('NORMAL'),
-                texcoords=result.attributes.get('TEXCOORD_0'),
-                indices=result.indices,
+                positions=piece.attributes['POSITION'],
+                normals=piece.attributes.get('NORMAL'),
+                texcoords=piece.attributes.get('TEXCOORD_0'),
+                indices=piece.indices,
                 material=externalise(
-                    group.material, where, reduction.subject.slug, reduction.textures
+                    piece.material, where, reduction.subject.slug, reduction.textures
                 ),
             )
         )
@@ -1069,10 +1227,11 @@ def page(reductions: list, described: str) -> str:
 def where_it_stopped(reduction: Reduction) -> str:
     """How far down the ladder a subject actually got.
 
-    Four answers. Its ladder was stopped early on purpose, because its triangles
-    start spanning its atlas islands above the bottom of the chain; it reached
-    the last rung; it ran out of contractions part way, which is the ``floor``;
-    or it produced a level
+    Five answers. Its ladder was stopped early on purpose, because its triangles
+    start spanning its atlas islands above the bottom of the chain; it was given
+    an atlas of its own at each level instead, so the floor the table quotes is
+    one it no longer meets; it reached the last rung; it ran out of contractions
+    part way, which is the ``floor``; or it produced a level
     for every rung and not one of them was the count that rung asked for --
     which is the answer a canopy of leaf cards gives, and reads as success
     unless it is said.
@@ -1086,6 +1245,8 @@ def where_it_stopped(reduction: Reduction) -> str:
     reached = reduction.levels[-1].triangles
     if reached > LEVELS[-1] * 1.05:
         return '%s tri, where %s was asked for' % (f'{reached:,}', f'{LEVELS[-1]:,}')
+    if reduction.subject.rewrap:
+        return 'the bottom of the chain, on an atlas baked per level'
     return 'reached the bottom of the chain'
 
 
@@ -1127,9 +1288,14 @@ def closing(reductions: list) -> list:
         ' How visible that is depends on how much of the model the small charts cover: an atlas of a few large charts and a handful of small ones loses only the handful, which is why the cliff and the rocks still read below the floor quoted for them. An atlas whose charts are *uniformly* small has nowhere to hide, and that is the case worth measuring for.'
         '\n\nThe lekking ruffs is the subject on this page that runs into it:'
         ' 405,540 triangles across 2,549 charts, a median of 88 triangles each,'
-        ' which puts its floor at 15,020. Its ladder stops at 32,000 for that'
-        ' reason and not for any the reduction has -- at 8,000 the geometry is'
-        ' still a fair bird and the texture on it is the ground.',
+        ' which puts its floor at 15,020 -- so carrying the published'
+        ' coordinates to 8,000 leaves a fair bird wearing the ground it stands'
+        ' on. Its levels here are unwrapped afresh instead, and the scan baked'
+        ' into the result, which is the operation that moves a texture floor:'
+        ' `OpenGLContext_editor.assets.rewrap`. It costs a bake per level and'
+        ' belongs to the authoring step rather than to the reduction -- the'
+        ' reduction is unchanged, and the sequence recorded for it is the same'
+        ' one.',
         '',
     ]
     out += [
@@ -1372,31 +1538,55 @@ def main(argv: list | None = None) -> int:
             % (', '.join(r.subject.slug for r in reductions), len(SUBJECTS))
         )
 
-    with open(os.path.join(PICTURES, 'measurements.json'), 'w', encoding='utf-8') as handle:
-        json.dump(
-            [
+    write_measurements(reductions, whole)
+    return 0
+
+
+def write_measurements(reductions: list, whole: bool) -> None:
+    """The numbers behind the page, as a file something else can read.
+
+    A partial run **replaces the subjects it did and keeps the rest**, for the
+    same reason it leaves the page alone: a run of one subject knows nothing
+    about the other three, and a file written from it would say they had no
+    measurements rather than that they were not measured.
+    """
+    path = os.path.join(PICTURES, 'measurements.json')
+    done = {
+        r.subject.slug: {
+            'subject': r.subject.slug,
+            'source_triangles': r.source_triangles,
+            'reduce_s': r.reduce_s,
+            'levels': [
                 {
-                    'subject': r.subject.slug,
-                    'source_triangles': r.source_triangles,
-                    'reduce_s': r.reduce_s,
-                    'levels': [
-                        {
-                            'triangles': level.triangles,
-                            'error': level.error,
-                            'measured': level.measured,
-                            'replay_ms': level.replay_ms,
-                            'draw_ms': level.draw_ms,
-                            'fps': level.fps,
-                        }
-                        for level in r.levels
-                    ],
+                    'triangles': level.triangles,
+                    'error': level.error,
+                    'measured': level.measured,
+                    'replay_ms': level.replay_ms,
+                    'draw_ms': level.draw_ms,
+                    'fps': level.fps,
                 }
-                for r in reductions
+                for level in r.levels
             ],
+        }
+        for r in reductions
+    }
+    held: dict = {}
+    if not whole and os.path.exists(path):
+        with open(path, encoding='utf-8') as handle:
+            held = {entry['subject']: entry for entry in json.load(handle)}
+    held.update(done)
+    # In the order the subjects are declared, so the file does not shuffle
+    # itself about according to which run last touched it. A slug the list no
+    # longer holds goes to the end rather than raising: a subject can be
+    # dropped, and the file is then one run behind rather than unwritable.
+    order = [s.slug for s in SUBJECTS]
+    place = {slug: at for at, slug in enumerate(order)}
+    with open(path, 'w', encoding='utf-8') as handle:
+        json.dump(
+            sorted(held.values(), key=lambda entry: place.get(entry['subject'], len(order))),
             handle,
             indent=2,
         )
-    return 0
 
 
 if __name__ == '__main__':

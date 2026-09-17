@@ -27,15 +27,15 @@ NumPy is the only dependency.
 
 ## What it does to a scan
 
-`coastal_cliff_04`, 1,537,926 triangles of photogrammetry, decimated **once** in 11.1 s -- every level below is a prefix of that one recording replayed.
+`coastal_cliff_04`, 1,537,926 triangles of photogrammetry, decimated **once** in 10.7 s -- every level below is a prefix of that one recording replayed.
 
 <table><tr><td align="center"><img src="https://raw.githubusercontent.com/mcfletch/opengl_decimate/main/docs/gallery/cliff-l0-shaded.png" width="190" alt="Coastal cliff at 1,537,926 triangles"><br><sub><b>1,537,926</b> tri</sub></td><td align="center"><img src="https://raw.githubusercontent.com/mcfletch/opengl_decimate/main/docs/gallery/cliff-l1-shaded.png" width="190" alt="Coastal cliff at 32,000 triangles"><br><sub><b>32,000</b> tri</sub></td><td align="center"><img src="https://raw.githubusercontent.com/mcfletch/opengl_decimate/main/docs/gallery/cliff-l2-shaded.png" width="190" alt="Coastal cliff at 8,000 triangles"><br><sub><b>8,000</b> tri</sub></td><td align="center"><img src="https://raw.githubusercontent.com/mcfletch/opengl_decimate/main/docs/gallery/cliff-l3-shaded.png" width="190" alt="Coastal cliff at 4,000 triangles"><br><sub><b>4,000</b> tri</sub></td></tr></table>
 
 | Subject | Source | Reduced in | Draw at source | Finest shipped | Draw there |
 |---|---:|---:|---:|---:|---:|
-| Coastal cliff | 1,537,926 tri | 11.1 s | 0.20 ms | 32,000 tri | 0.04 ms |
-| Lekking ruffs | 547,647 tri | 6.3 s | 0.24 ms | 32,000 tri | 0.07 ms |
-| Coastal land rocks | 1,291,146 tri | 9.5 s | 0.18 ms | 32,000 tri | 0.05 ms |
+| Coastal cliff | 1,537,926 tri | 10.7 s | 0.20 ms | 32,000 tri | 0.04 ms |
+| Lekking ruffs | 547,647 tri | 5.3 s | 0.21 ms | 32,000 tri | 0.06 ms |
+| Coastal land rocks | 1,291,146 tri | 9.0 s | 0.17 ms | 32,000 tri | 0.04 ms |
 | Marble bust | 17,456 tri | 0.1 s | 0.04 ms | 17,456 tri | 0.04 ms |
 
 [**docs/GALLERY.md**](docs/GALLERY.md) has every level of every subject, each drawn from touching distance out to barely visible, with what it cost to make and what it costs to draw.
