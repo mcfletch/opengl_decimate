@@ -11,11 +11,11 @@ table::
 
 **What it needs beyond the package.** ``opengl_decimate`` depends on NumPy and
 nothing else, and that does not change: this is a documentation tool, not part
-of the library. It reads glTF, merges a model's primitives and renders the
-levels through **OpenGLContext**, and fetches the CC0 subjects through
-**OpenGLContext-editor**'s Poly Haven client. Both are siblings of this package
-in the workspace it is developed in, and neither is imported by anything a user
-installs.
+of the library. It reads glTF and renders the levels through
+**OpenGLContext**, and fetches the CC0 subjects and builds their chains through
+**OpenGLContext-editor** -- its Poly Haven client and its ``meshlod``. Both are
+siblings of this package in the workspace it is developed in, and neither is
+imported by anything a user installs.
 
 A subject marked ``rewrap`` additionally wants ``OpenGLContext-editor[rewrap]``,
 which brings the unwrapper a per-level atlas is laid out with. That import is
@@ -474,7 +474,7 @@ def ladder(triangles: int, stop_below: int = 0) -> list:
 
 def reduce_subject(subject: Subject, certify: bool) -> Reduction:
     """Decimate one subject once per material, and read every level off it."""
-    from OpenGLContext.meshlod.chain import bounding_sphere
+    from OpenGLContext_editor.meshlod.chain import bounding_sphere
 
     from opengl_decimate import SimplifyOptions, collapse_sequence, topology
     from opengl_decimate import certify as certification
@@ -916,7 +916,7 @@ def choose_distances(reduction: Reduction, probe: Any) -> None:
     that changed, because the two want different remedies: a moved outline needs
     triangles, changed shading needs a normal map.
     """
-    from OpenGLContext.meshlod.quality import pop_breakdown
+    from OpenGLContext_editor.meshlod.quality import pop_breakdown
 
     source = merged_level(reduction.levels[0])
     # A chain has to be ordered: a coarser level is never usable closer than a
@@ -1161,7 +1161,7 @@ def page(reductions: list, described: str) -> str:
         '',
         "The **outline** and **shading** figures are the engine's own measurement"
         ' of the swap where it is drawn:'
-        ' [`pop_breakdown`](../../openglcontext/OpenGLContext/meshlod/quality.py)'
+        ' [`pop_breakdown`](../../openglcontext-editor/src/OpenGLContext_editor/meshlod/quality.py)'
         " splits the share of the object's pixels that change into the part whose"
         ' outline moved and the part that merely shaded differently. The two want'
         ' different remedies -- a moved outline needs triangles, changed shading'
@@ -1500,8 +1500,8 @@ def main(argv: list | None = None) -> int:
     )
 
     if not options.no_render:
-        from OpenGLContext.meshlod.quality import LODProbe
         from OpenGLContext.testing.glcontext import hidden_window
+        from OpenGLContext_editor.meshlod.quality import LODProbe
 
         # Each level is written here as a glb so `oglc-view` can draw it with
         # its own materials. They are a step on the way to the pictures, not
