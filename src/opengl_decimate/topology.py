@@ -503,9 +503,9 @@ def _connected(links_from: IndexArray, links_to: IndexArray, count: int) -> Inde
     everything under it at once, while moving the item moves only the item and
     the news travels one link per round.
 
-    The difference is the whole cost on anything but a fan. A photogrammetry
-    scan's surface is a handful of components over millions of corners, and a
-    texture atlas is a hundred or so; those are the chains that are long.
+    Chains are long wherever a component is large: a photogrammetry scan's
+    surface is a handful of components over millions of corners, and a texture
+    atlas is a hundred or so charts.
     """
     label = np.arange(count, dtype=np.int64)
     while True:

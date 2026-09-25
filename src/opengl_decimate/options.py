@@ -77,22 +77,18 @@ class SimplifyOptions:
         normal, so the edge between them survives the recomputation.
 
         A hard-edged export carries one position as several vertices with
-        several normals, which is the author saying where the edges are; a mesh
-        that arrived with no normals at all is asked about its own folds
-        instead. Where there are normals they answer alone, because they say
-        which edges a model is *smooth* across as well -- a scan whose normals
-        run smoothly over rubble is its author saying the rubble is not a set of
-        edges, and splitting on the folds anyway costs a coastal-rock scan
-        seventy per cent more vertices for shading no closer to the original.
+        several normals, which marks where its edges are; a mesh that arrived
+        with no normals at all is asked about its own folds instead. Where there
+        are normals they answer alone, because they also say which edges a
+        model is *smooth* across: a scan whose normals run smoothly over rubble
+        does not want the rubble split into edges.
 
         Without any of this a recomputation averages across every edge and a
         cube comes back round. Sixty degrees sits above the angle a scan's own
         curvature reaches over a coarse triangle and below the edge of a box, so
-        it keeps what was built hard and splits nothing that merely bends: on a
-        coastal-rock scan at eight thousand triangles it shades within three
-        degrees of the original for a third fewer extra vertices than forty
-        does. Zero makes every edge hard, which is flat shading; 180 makes none.
-        Read only when ``recompute_normals`` is on.
+        it keeps what was built hard and splits nothing that merely bends.
+        Zero makes every edge hard, which is flat shading; 180 makes none. Read
+        only when ``recompute_normals`` is on.
     :param locked: further vertices to hold, by index into the arrays handed
         in. Welding joins every vertex at one position into one point, so
         holding a vertex holds the others at its position too.

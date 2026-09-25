@@ -54,7 +54,9 @@ Each point accumulates the planes of its incident triangles, weighted by area �
 which stops a dense patch of tiny triangles outvoting the large ones around it,
 so the quadric measures deviation of *surface* rather than a count of planes.
 
-**Where the origin is.** A plane's constant term is the squared plane offset,
+### Where the origin is
+
+A plane's constant term is the squared plane offset,
 taken from the point's own coordinates. For a model at Earth-centred
 coordinates — `p` around 6.4e6, which is what 3D Tiles and any ECEF-referenced
 world uses — that constant is around 4e13, while the squared distance the
@@ -73,7 +75,9 @@ placements and the same reported error.
 `POSITION` comes back in the float dtype it arrived in, for the same reason — a
 `float32` ulp at 6.4e6 is half a metre.
 
-**Border constraints.** A border edge has one face, and a plane standing
+### Border constraints
+
+A border edge has one face, and a plane standing
 perpendicular to that face along the edge is a wall the border may slide along
 but not leave. Both ends of every border edge accumulate it. Without this the
 outline of a patch creeps inward as the patch is reduced.
@@ -130,7 +134,9 @@ the two points, square-rooted — so it is a length in model units rather than a
 area-weighted square, which is what makes `target_error` a figure a caller can
 picture.
 
-**What that length is, exactly.** The cost is a sum of squared distances to
+### What that length is, exactly
+
+The cost is a sum of squared distances to
 planes, each weighted by the area of the triangle that contributed it; the
 divisor is the sum of those same areas. Both accumulate together as points
 merge, so the ratio stays a *mean*: the deviation is the area-weighted
@@ -147,7 +153,9 @@ on [`certify`](#8-measure-what-happened) rather than on this.
 Five questions, all asked every time, because the cases they catch are not rare
 — they are what a dense mesh is made of.
 
-**The link condition.** Contracting is safe exactly when the points joined to
+### The link condition
+
+Contracting is safe exactly when the points joined to
 both ends of the edge are precisely the points opposite it. A shared neighbour
 anywhere else becomes, after the merge, an edge carrying three triangles. An
 open surface is treated as closed by a virtual point joined to every border
@@ -155,16 +163,22 @@ point, which adds one refusal: a border edge whose triangle has its other two
 edges on the border as well. That triangle is the last one of its piece, so an
 open piece keeps at least one triangle and a closed one at least four.
 
-**No duplicate face.** The link condition alone lets a small closed shape fold
+### No duplicate face
+
+The link condition alone lets a small closed shape fold
 onto itself: a tetrahedron contracts to two triangles back to back, which passes
 every local test and encloses nothing.
 
-**No fold.** Every face that has to outlive the contraction is checked against the
+### No fold
+
+Every face that has to outlive the contraction is checked against the
 proposed placement, before and after. A normal that turns further than
 `max_normal_flip` has been folded over rather than moved, and the surface would
 render inside out there. A face that collapses to a line is refused outright.
 
-**The seam, where `lock_seams` asks for it.** A point drawn at more than one
+### The seam, where `lock_seams` asks for it
+
+A point drawn at more than one
 texture coordinate may then merge only with a point drawn at the same number,
 and only along an edge whose two faces are in different charts of the atlas.
 That is the same shape of rule as the border one and holds the seam network
@@ -176,14 +190,18 @@ difference between reaching five hundred triangles and stopping at two thousand.
 What it buys is a seam that does not slide, which is worth its triangles where
 the atlas is thousands of small charts and the sliding is most of the surface.
 
-**Shape, optionally.** `min_triangle_quality` refuses a contraction leaving a
+### Shape, optionally
+
+`min_triangle_quality` refuses a contraction leaving a
 triangle thinner than a scale-free quality measure allows — four root three times
 the area over the summed squared edge lengths, which is 1 for equilateral and 0
 for a line. Off by default: it trades reduction for triangle shape.
 
 ## 5. Choose the next one
 
-**`heap`** keeps every candidate in a priority queue ordered by deviation, with
+### `heap`
+
+`heap` keeps every candidate in a priority queue ordered by deviation, with
 lazy invalidation: an entry that has been superseded is discarded when it is
 popped rather than hunted down when it goes stale. After a contraction only the
 survivor's quadric changed, so only the edges around it are re-priced — one
@@ -202,7 +220,9 @@ This is the best quality available and it is sequential by construction: every
 contraction changes the price of its neighbours, so the next choice depends on
 the last.
 
-**`multiple-choice`** draws a few candidates at random and contracts the cheapest
+### `multiple-choice`
+
+`multiple-choice` draws a few candidates at random and contracts the cheapest
 of them. There is no global ordering to maintain and no queue to keep, every step
 costs the same as every other, and the quality loss is small. A pair drawn and
 not contracted -- no longer an edge, over the error budget, or refused by
@@ -214,7 +234,9 @@ of failures.
 Giving up the global ordering makes a reduction divisible, so this is the
 schedule a parallel or GPU implementation is built on.
 
-**Only `heap` has the compiled loop.** `multiple-choice` runs the NumPy
+### Only `heap` has the compiled loop
+
+`multiple-choice` runs the NumPy
 implementation whether or not the accelerator is installed, so as it stands it
 is around thirty times slower per face than the schedule it is the scalable
 alternative to. The divisibility is what it is for; the throughput is not yet
@@ -278,7 +300,9 @@ without any seam-specific machinery.
 Vertices are numbered by first use in the index stream. `vertex_map` relates the
 input's vertices to the output's.
 
-**Normals, where they are recomputed.** `recompute_normals` is what a level a
+### Normals, where they are recomputed
+
+`recompute_normals` is what a level a
 game ships wants. A carried normal is the one measured at its own vertex and is
 the more accurate of the two — on the marble bust at 8,000 triangles it sits 1.9
 degrees from the source surface against 5.6 for a recomputed one — but its error
@@ -317,7 +341,9 @@ the seven regions a nearest point can fall in — the face, three edges, three
 corners — and every region is evaluated for every pair with the right one
 selected, which makes it one pass over arrays rather than a branch per triangle.
 
-**Finding the triangle to measure against.** Testing every sample against every
+### Finding the triangle to measure against
+
+Testing every sample against every
 triangle is the product of the two counts, which on a scan is billions. So the
 triangles go into a uniform grid — each registered in every cell its bounding
 box covers — and a sample is measured against the handful in the cells around

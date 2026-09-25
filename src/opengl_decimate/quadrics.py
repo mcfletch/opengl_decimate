@@ -220,8 +220,8 @@ def minimize(quadrics: FloatArray, tolerance: float = 1e-10) -> tuple[FloatArray
 
     A determined minimum can still be far from any edge it is asked about,
     where the matrix is nearly singular: the point then slides along the
-    valley to wherever rounding put it. Bounding that is the caller's job,
-    because only the caller knows which edge it was.
+    valley to wherever rounding put it. The reducer drops a minimum further
+    from its edge's midpoint than the edge is long.
     """
     quadrics = np.asarray(quadrics, dtype='d')
     a00, a01, a02 = quadrics[:, 0], quadrics[:, 1], quadrics[:, 2]

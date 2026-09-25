@@ -42,8 +42,8 @@ BLOCK = 256
 #: triangle, so the work is the product of the two counts -- and so is the
 #: memory, unless the product is what gets divided up rather than one side of
 #: it. A 1.5M-triangle reference against 256 points at a time is nine gigabytes
-#: of temporaries for a single block, which is not a slow measurement but a dead
-#: process. Blocking both ways bounds it here regardless of either count.
+#: of temporaries for a single block, more than most machines have. Blocking
+#: both ways bounds it here regardless of either count.
 BLOCK_BYTES = 64 * 1024 * 1024
 
 #: Doubles held per point-triangle pair while the closest point is found: the
@@ -92,8 +92,8 @@ def distance_to_mesh(points: FloatArray, positions: FloatArray, indices: IndexAr
     The triangles go into a uniform grid and each point is measured against the
     handful in the cells around it, widening until the answer is known to be
     inside what has been searched. Testing every point against every triangle
-    instead is the product of the two counts, and for the meshes this package
-    exists for that is not a slow measurement but one nobody waits for.
+    instead is the product of the two counts: for a scan of a million triangles
+    and four thousand samples, four billion tests.
     """
     points = np.asarray(points, dtype='d')
     faces = np.asarray(indices).reshape(-1, 3)
@@ -143,7 +143,7 @@ def _nearest_among(points: FloatArray, corners: FloatArray) -> tuple[FloatArray,
     is the product of the two counts -- and so is the memory, unless the product
     is what gets divided up rather than one side of it. A 1.5M-triangle mesh
     against 256 points at a time is nine gigabytes of temporaries for a single
-    block, which is not a slow measurement but a dead process.
+    block, more than most machines have.
 
     The winning triangle is carried alongside the distance because finding it
     again afterwards would mean searching twice.
@@ -208,9 +208,9 @@ def scan_is_cheaper(ring_cells: int, per_cell: float, triangles: int) -> bool:
     is a comparison of triangles tested: one more ring asks for the triangles in
     its cells, and a scan asks for the whole reference.
 
-    The currency matters. Comparing a *count of points* or a *count of cells*
-    against a count of triangles -- which is the mistake this replaces -- reads
-    as a sensible rule and is out by whatever the two units differ by. On a mesh
+    Both sides are counted in triangles tested. Comparing a *count of points*
+    or a *count of cells* against a count of triangles would be out by whatever
+    the two units differ by. On a mesh
     of a million triangles at eight to a cell, one more ring of three hundred
     cells is two thousand tests a point and the scan is a million: a factor of
     four hundred, spent on the handful of points that had almost arrived.

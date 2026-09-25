@@ -22,8 +22,8 @@ array work. This takes the mesh as arrays, mutates them in place, and hands
 back the log of what it did. The loop runs with the GIL released, so a
 reduction on a worker thread leaves the rest of the process at full speed.
 
-**Staleness without a map from edge to version.** A contraction changes the
-price of exactly the edges touching the survivor, and those are re-priced and
+Staleness is tracked without a map from edge to version. A contraction changes
+the price of exactly the edges touching the survivor, and those are re-priced and
 re-queued when it happens. Rather than a version per *edge* -- a hash map the
 size of the queue, which is the structure that would not fit -- each *point*
 carries one, bumped when its quadric changes, and every queued entry names the

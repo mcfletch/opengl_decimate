@@ -2,18 +2,19 @@
 
 A decimation can only merge the ends of an edge, and three properties of a model
 decide how many edges there are to merge. All three are cheap to measure and
-none of them changes as the reduction runs, so the answer is available up front:
+none of them changes as the reduction runs, so the answer is available up front.
 
-**Pieces.** Every connected piece reduces on its own and keeps at least one
-triangle -- four if it is closed. A canopy of separate leaf cards is as many
-pieces as it has cards, so no target takes it below the count of the leaves.
+The first is the pieces. Every connected piece reduces on its own and keeps at
+least one triangle -- four if it is closed. A canopy of separate leaf cards is
+as many pieces as it has cards, so no target takes it below the count of the
+leaves.
 
-**Handles.** A tunnel through the surface survives every contraction: the link
-condition preserves topology by construction, which is what it is for. A scan of
-feathers or lace arrives with hundreds and each costs the triangles it takes to
-go round it.
+The second is the handles. A tunnel through the surface survives every
+contraction, because the link condition preserves topology. A scan of feathers
+or lace arrives with hundreds and each costs the triangles it takes to go round
+it.
 
-**The atlas.** An unwrap cuts the surface into charts and lays them flat on the
+The third is the atlas. An unwrap cuts the surface into charts and lays them flat on the
 image, duplicating the vertices along each cut -- so every vertex belongs to
 exactly one chart, and a triangle samples the part of the image it is sitting on
 only while all three of its corners are in the same one. A contraction across a

@@ -138,9 +138,9 @@ disallow_incomplete_defs = true
 warn_return_any = false
 
 [tool.cibuildwheel]
-# Stable CPython only. A wheel per platform means an ordinary `pip install`
-# gets the compiled reducer without needing a toolchain, which is the whole
-# point: the NumPy fallback is correct but cannot reduce a scan.
+# Stable CPython only. A wheel per platform gives an ordinary `pip install`
+# the compiled reducer without a toolchain; the NumPy fallback is correct but
+# too slow to reduce a scan.
 #
 # Free-threaded builds (`cp313t`, `cp314t`) are not produced: `cp314-*` does not
 # match `cp314t-*`, so adding them is a deliberate act rather than something

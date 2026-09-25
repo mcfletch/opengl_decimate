@@ -14,10 +14,8 @@ the rest of the package follows: a value is *carried*, never invented. The
 corner takes up a vertex that was already on the surface, and its attributes are
 the ones measured there.
 
-Two questions decide which vertex.
-
-**Which end of the edge the merged point is at.** The placement is somewhere on
-or near the edge, and the two ends were measured in different places, so the
+Two questions decide which vertex. The first is which end of the edge the
+merged point is at. The placement is somewhere on or near the edge, and the two ends were measured in different places, so the
 copies to keep are the ones measured nearest to where the surface now is. Which
 end that is has little to do with which *index* survived -- the placement is
 chosen from the edge before the legality tests say which end may die -- so it is
@@ -25,8 +23,8 @@ asked of the geometry. The losing end's copies are let go, and that end's index
 never sources a corner again, which keeps the answer a single hop per vertex for
 the whole reduction.
 
-**Which copy, where the winning end has several.** A point on a texture seam is
-one position drawn twice, once per chart, and the copies differ only in what
+The second is which copy, where the winning end has several. A point on a
+texture seam is one position drawn twice, once per chart, and the copies differ only in what
 they carry. The copy nearest in attribute space is the copy on the same side of
 the seam, so choosing it keeps each chart's triangles reading from their own
 chart and a seam stays a seam rather than becoming a smear across the texture.

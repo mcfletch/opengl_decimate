@@ -44,7 +44,9 @@ NumPy is the only dependency.
 
 ## What it does
 
-**Quadric error metrics.** Each point carries a quadric accumulated from the
+### Quadric error metrics
+
+Each point carries a quadric accumulated from the
 planes of the triangles around it, weighted by their area. Merging two points
 costs the summed quadric evaluated where it is smallest, and that smallest place
 is one 3x3 solve. The classical metric (Garland & Heckbert) and the
@@ -52,14 +54,18 @@ is one 3x3 solve. The classical metric (Garland & Heckbert) and the
 second reads each plane as a noisy sample and minimises the *expected* squared
 distance, which makes a single plane solvable and a reconstructed surface behave.
 
-**Rules that keep the result a surface.** Before any contraction: the link
+### Rules that keep the result a surface
+
+Before any contraction: the link
 condition, so an edge never ends up with three triangles on it; a duplicate-face
 check, so a small closed shape cannot fold onto itself; a normal-flip test, so a
 fan is never turned inside out; and an optional triangle-shape floor. Points are
 classified once as manifold, border or locked, and a border point moves only
 along its border, so the outline of an open patch stays where it was.
 
-**Attributes are carried, never invented.** Every value in the output is a value
+### Attributes are carried, never invented
+
+Every value in the output is a value
 that was in the input, measured at the place the surface now is: a contraction
 hands the corners it merges to the end of the edge the merged point came to rest
 nearest, so a texture coordinate and a normal travel with the position they
@@ -80,7 +86,9 @@ levels facet. Recomputing accumulates per smoothing group rather than per point,
 so `crease_angle` keeps the edges the model was built hard across and a cube does
 not come back round.
 
-**A recorded reduction, replayed to any target.** `collapse_sequence` runs the
+### A recorded reduction, replayed to any target
+
+`collapse_sequence` runs the
 whole reduction once and records it; `at()` then reaches any triangle count by
 replaying a prefix — four array operations, not another decimation. A target
 costs a replay rather than a reduction, and costs the same however far along the
@@ -95,7 +103,9 @@ coarser = sequence.at(target_count=500)      # also immediate
 within = sequence.at(target_error=0.01)      # or by deviation
 ```
 
-**A measured error, not only an estimate.** `result.error` is what the quadrics
+### A measured error, not only an estimate
+
+`result.error` is what the quadrics
 predicted: an area-weighted root-mean-square distance to the planes, which is the
 right thing to steer a reduction by and is not a bound on anything. `certify=True`,
 or `opengl_decimate.certify.surface_deviation`, samples both surfaces in both
@@ -103,7 +113,9 @@ directions and measures the worst place either is from the other — which is th
 number a level of detail's error bound should be built on, and runs about twice
 `result.error`. One direction alone cannot see a hole.
 
-**How far a model will go, before spending a reduction on it.** Some meshes
+### How far a model will go, before spending a reduction on it
+
+Some meshes
 cannot be decimated, and the reason is always a property of the mesh: a canopy
 of separate leaf cards is as many pieces as it has cards and every piece keeps a
 triangle; lace has a handle through every hole, and no contraction closes one;

@@ -9,11 +9,11 @@ table::
     tools/gallery.py --only bust      # one of them
     tools/gallery.py --no-render      # the measurements, without a GPU
 
-**What it needs beyond the package.** ``opengl_decimate`` depends on NumPy and
-nothing else, and that does not change: this is a documentation tool, not part
-of the library. It reads glTF and renders the levels through
-**OpenGLContext**, and fetches the CC0 subjects and builds their chains through
-**OpenGLContext-editor** -- its Poly Haven client and its ``meshlod``. Both are
+Beyond the package, it needs two siblings. ``opengl_decimate`` depends on
+NumPy and nothing else; this is a documentation tool, not part of the library.
+It reads glTF and renders the levels through OpenGLContext, and fetches the CC0
+subjects and builds their chains through OpenGLContext-editor -- its Poly Haven
+client and its ``meshlod``. Both are
 siblings of this package in the workspace it is developed in, and neither is
 imported by anything a user installs.
 
@@ -511,7 +511,7 @@ def reduce_subject(subject: Subject, certify: bool) -> Reduction:
     )
 
     # One reduction per material. Every rung below is a prefix replay of those
-    # recordings, which is the whole point of `collapse_sequence`.
+    # recordings, through `collapse_sequence`.
     start = time.perf_counter()
     groups = [
         Group(
@@ -1142,7 +1142,7 @@ def page(reductions: list, described: str) -> str:
         ' reference: not a level anything would draw, but the picture the rest'
         ' are judged against.' % (', '.join(f'{count:,}' for count in LEVELS),),
         '',
-        '**Each level is drawn where a renderer would have chosen it.** The rule'
+        'Each level is drawn where a renderer would have chosen it. The rule'
         ' is screen-space error: a level is placed at the distance where its'
         ' *measured* deviation from the source projects to **one pixel**, which'
         ' is what a streaming renderer switches on. A length in model units says'
@@ -1166,13 +1166,13 @@ def page(reductions: list, described: str) -> str:
         ' needs a normal map baked from the fine mesh -- and one number for both'
         ' would hide which is happening.',
         '',
-        "- **`result.error`** is the reducer's own figure: an area-weighted"
+        "- `result.error` - the reducer's own figure: an area-weighted"
         ' root-mean-square distance to the planes it has been through, not a bound.',
-        '- **Measured** is `certify.surface_deviation`, the sampled two-sided'
-        ' Hausdorff distance from the source surface -- the number a switching'
+        '- Measured - `certify.surface_deviation`, the sampled two-sided'
+        ' Hausdorff distance from the source surface, which a switching'
         " distance is built on. Both are in the model's own units.",
-        '- **Replay** is what `at()` cost to produce that level.',
-        '- **Draw** and **frame rate** are the level rendered into a %d x %d'
+        '- Replay - what `at()` cost to produce that level.',
+        '- Draw and frame rate - the level rendered into a %d x %d'
         ' framebuffer with the geometry resident, timed with `glFinish` around'
         ' each frame and reported as the median of %d. No swap and no'
         ' compositor, so the number is what the triangles cost rather than what'
@@ -1260,22 +1260,23 @@ def closing(reductions: list) -> list:
         ' `opengl_decimate.survey` measures all three off any mesh, before a'
         ' reduction is spent on it.',
         '',
-        '**Pieces.** Every connected piece reduces on its own and each has a'
-        ' floor of its own -- a closed shell cannot go below four triangles --'
+        'The first is the pieces. Every connected piece reduces on its own and'
+        ' each has a floor of its own -- an open piece keeps one triangle and a'
+        ' closed shell four --'
         ' so a scan that arrived with the subject and two hundred crumbs spends'
         ' four triangles on each crumb however coarse a target it is given.'
         ' `drop_components_below` takes the pieces smaller than a given share of'
         " the model's diagonal, and never the largest.",
         '',
-        '**Handles.** A tunnel through the surface cannot be closed at all.'
-        ' Contracting an edge under the link condition preserves topology by'
-        ' construction -- that is what the condition is for -- so every handle'
+        'The second is the handles. A tunnel through the surface cannot be'
+        ' closed at all. Contracting an edge under the link condition preserves'
+        ' topology, so every handle'
         ' survives to the end and costs the triangles it takes to go round it.'
         ' A scan of feathers, foliage or lace arrives with hundreds, and no'
         ' option in this package will remove one: closing a tunnel is a'
         ' different operation from contracting an edge.',
         '',
-        '**The atlas.** A texture coordinate means something only inside one'
+        'The third is the atlas. A texture coordinate means something only inside one'
         ' chart -- one connected piece of surface that was unwrapped as one --'
         ' so a triangle covering more surface than a chart holds has no'
         ' coordinate that fits it. The reduction still runs, and what it draws'
