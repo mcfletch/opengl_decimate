@@ -58,13 +58,19 @@ def simplify(
     ``result.error`` is the reduction's own estimate, accumulated from the
     quadrics. ``options.certify`` additionally measures the deviation of the
     result from the input and puts it in ``result.measured_error``, which is the
-    number a level of detail's error bound should be built on.
+    number a level of detail's error bound should be built on. Pieces
+    ``drop_components_below`` removed are not part of the input it is measured
+    against.
     """
-    result = _reduce(attributes, indices, options, exhaust=False).at()
+    sequence = _reduce(attributes, indices, options, exhaust=False)
+    result = sequence.at()
     if options.certify:
+        # Measured against the surface the reduction started from: the input's
+        # own vertices, less the triangles welding left without area and the
+        # pieces drop_components_below was asked to remove.
         result.measured_error = certify.surface_deviation(
             np.asarray(attributes[POSITION]),
-            np.asarray(indices),
+            sequence.corners,
             result.attributes[POSITION],
             result.indices,
             samples=options.certify_samples,

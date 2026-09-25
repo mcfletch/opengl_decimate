@@ -120,7 +120,7 @@ zero.
 | `attributes` | `dict[str, ndarray]` | the reduced mesh. Every attribute keeps the dtype it arrived with, `POSITION` included — a `POSITION` that was not a float dtype comes back float32 |
 | `indices` | `ndarray` | flat triangle list, `uint32` |
 | `error` | `float` | the reduction's own estimate of the deviation, in model units: an area-weighted root-mean-square distance to the planes, not a bound |
-| `measured_error` | `float \| None` | the *measured* deviation, where `certify` was on |
+| `measured_error` | `float \| None` | the *measured* deviation, where `certify` was on, from the input less the pieces `drop_components_below` removed |
 | `vertex_map` | `ndarray` | for every vertex of the input, the output vertex it became or was merged into; `-1` where its surface is gone |
 | `collapses` | `int` | contractions applied |
 | `input_triangles` | `int` | triangles the caller handed in, which is what `target_ratio` is a share of |

@@ -202,6 +202,33 @@ class TestCertifyingAReduction:
         )
         assert result.measured_error == pytest.approx(direct.max)
 
+    def test_the_pieces_the_caller_dropped_are_not_counted_as_deviation(self):
+        """`drop_components_below` removes crumbs on purpose, so their distance is no error.
+
+        Three hundred specks well away from the subject, as a scan brings in
+        whatever else was in the room: together they are a few per cent of the
+        surface, enough for the forward samples to land on them.
+        """
+        positions, indices = shapes.icosphere(3)
+        rng = np.random.default_rng(3)
+        where = rng.normal(size=(300, 3))
+        where = 3.0 * where / np.linalg.norm(where, axis=1)[:, None]
+        speck = np.asarray([(0.0, 0.0, 0.0), (0.04, 0.0, 0.0), (0.0, 0.04, 0.0)])
+        specks = (where[:, None, :] + speck[None, :, :]).reshape(-1, 3).astype('f4')
+        options = SimplifyOptions(
+            target_ratio=0.25, certify=True, certify_samples=2000, drop_components_below=0.01
+        )
+        alone = simplify({'POSITION': positions}, indices, options)
+        crumbed = simplify(
+            {'POSITION': np.concatenate([positions, specks])},
+            np.concatenate(
+                [indices, np.arange(len(specks), dtype=np.uint32) + np.uint32(len(positions))]
+            ),
+            options,
+        )
+        assert crumbed.dropped_away == 300
+        assert crumbed.measured_error == pytest.approx(alone.measured_error, rel=0.5)
+
 
 class TestEmptySurfaces:
     def test_a_mesh_with_no_triangles_cannot_be_sampled(self):
