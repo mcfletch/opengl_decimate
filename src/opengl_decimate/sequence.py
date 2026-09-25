@@ -25,7 +25,6 @@ Fifty asks cost fifty replays, which is still a fraction of one reduction.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
 import numpy as np
 
@@ -103,16 +102,19 @@ class CollapseSequence:
     #: Where a recomputed normal keeps an edge hard, in degrees, on top of what
     #: the input's own normals already say. See ``SimplifyOptions``.
     crease_angle: float = 0.0
-    origin: Any = field(default_factory=lambda: np.zeros(3, dtype='d'))
+    origin: FloatArray = field(default_factory=lambda: np.zeros(3, dtype='d'))
     #: Triangles the caller handed in, before welding dropped any. A ratio is a
     #: share of these; ``faces`` is what welding left to reduce.
     input_faces: int | None = None
     #: Triangles removed for belonging to a component too small to be worth them.
     dropped_faces: int = 0
-    _removed_by_step: Any = field(default=None, repr=False)
-    _moved: Any = field(default=None, repr=False)
-    _moved_to: Any = field(default=None, repr=False)
-    _moved_by_step: Any = field(default=None, repr=False)
+    #: Filled in from the fields above: how many faces the first ``k``
+    #: contractions removed, and the corner handovers of
+    #: :func:`~opengl_decimate.corners.corner_moves`.
+    _removed_by_step: IndexArray = field(init=False, repr=False)
+    _moved: IndexArray = field(init=False, repr=False)
+    _moved_to: IndexArray = field(init=False, repr=False)
+    _moved_by_step: IndexArray = field(init=False, repr=False)
 
     def __len__(self) -> int:
         """How many contractions were recorded."""
@@ -249,7 +251,9 @@ def _position_dtype(attributes: dict[str, np.ndarray]) -> np.dtype:
     return dtype if dtype.kind == 'f' else np.dtype('f4')
 
 
-def _first_appearance(inverse: IndexArray, representative: IndexArray) -> tuple[Any, Any]:
+def _first_appearance(
+    inverse: IndexArray, representative: IndexArray
+) -> tuple[IndexArray, IndexArray]:
     """Renumber unique-group labels so group ``k`` is the ``k``-th to appear.
 
     ``np.unique`` numbers in sorted order, which would make the output vertex
@@ -320,8 +324,8 @@ def _emit(
     if group is not None:
         columns.append(group.astype('d')[:, None])
     key = np.concatenate(columns, axis=1)
-    _, representative, inverse = np.unique(key, axis=0, return_index=True, return_inverse=True)
-    out_index, representative = _first_appearance(inverse.reshape(-1), representative)
+    _, first, inverse = np.unique(key, axis=0, return_index=True, return_inverse=True)
+    out_index, representative = _first_appearance(inverse.reshape(-1), first)
 
     out_point = flat_points[representative]
     out_source = flat_corners[representative]

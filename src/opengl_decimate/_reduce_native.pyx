@@ -832,7 +832,9 @@ cdef class Reducer:
         cdef Heap heap
         cdef int failure
 
-        heap_init(&heap, 1024)
+        # Seeding queues at most one entry per edge, so that is where it starts;
+        # the entries re-queued after each contraction grow it from there.
+        heap_init(&heap, max(SCRATCH, edges.shape[0]))
         try:
             with nogil:
                 failure = self._loop(&heap, edges, target_faces)

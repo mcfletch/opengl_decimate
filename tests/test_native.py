@@ -209,7 +209,12 @@ class TestTheTwoPathsAgree:
         assert np.array_equal(compiled.indices, pure.indices)
 
     def test_they_agree_past_the_queue_and_log_capacities(self):
-        """Both grow from 1024, so a mesh smaller than that never grows either."""
+        """The log grows from 1024 entries and the queue from one per edge.
+
+        The first contraction re-queues its survivor's ring on a queue already
+        holding every edge, so the queue grows on any mesh; the log grows only
+        past 1024 contractions.
+        """
         positions, indices = shapes.icosphere(4)
         compiled, pure = _both({'POSITION': positions}, indices, SimplifyOptions(target_ratio=0.1))
         assert compiled.collapses > 1024
