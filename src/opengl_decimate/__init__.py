@@ -21,10 +21,10 @@ count by replaying a prefix of it -- which is how an editor's target slider
 answers without decimating again.
 """
 
+from opengl_decimate.floors import Survey, survey
 from opengl_decimate.options import SimplifyOptions
+from opengl_decimate.reduction import collapse_sequence, simplify
 from opengl_decimate.sequence import CollapseSequence, SimplifyResult
-from opengl_decimate.simplify import collapse_sequence, simplify
-from opengl_decimate.survey import Survey, survey
 from opengl_decimate.types import DecimateError
 
 __version__ = '0.1.0a1'

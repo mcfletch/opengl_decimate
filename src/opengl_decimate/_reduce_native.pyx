@@ -30,7 +30,7 @@ carries one, bumped when its quadric changes, and every queued entry names the
 two versions it was priced against. A pop whose versions have moved on has been
 superseded by an entry already in the queue, and is dropped.
 
-The NumPy path in :mod:`opengl_decimate.simplify` reaches the same order with a
+The NumPy path in :mod:`opengl_decimate.reduction` reaches the same order with a
 stamp per pair, which it can afford because it is not the path a scan goes
 through. The two agree because a pair is stale under one exactly when it is
 stale under the other: both are bumped by the same event, a contraction at one

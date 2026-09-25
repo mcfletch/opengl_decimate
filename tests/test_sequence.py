@@ -8,18 +8,19 @@ produced, and that asking fifty times costs about what asking once costs.
 """
 
 import itertools
-import sys
 import tracemalloc
 
 import numpy as np
 import pytest
 import shapes
 
-from opengl_decimate import CollapseSequence, SimplifyOptions, collapse_sequence, simplify
-
-# `opengl_decimate.simplify` is the function, not the module: the package
-# re-exports it under that name, which shadows the submodule on the package.
-simplify_module = sys.modules['opengl_decimate.simplify']
+from opengl_decimate import (
+    CollapseSequence,
+    SimplifyOptions,
+    collapse_sequence,
+    reduction,
+    simplify,
+)
 
 
 def _sphere(subdivisions=3):
@@ -183,14 +184,14 @@ class TestReplayCost:
         attributes, indices = _sphere(2)
         sequence = collapse_sequence(attributes, indices)
         reductions = []
-        original = simplify_module._Engine
+        original = reduction._Engine
 
         class Counted(original):  # type: ignore[valid-type, misc]
             def __init__(self, *args, **named):
                 reductions.append(1)
                 super().__init__(*args, **named)
 
-        simplify_module._Engine = Counted
+        reduction._Engine = Counted
         try:
             # The reduction the sequence was recorded with is the only one.
             simplify(attributes, indices, SimplifyOptions(target_count=100))
@@ -199,7 +200,7 @@ class TestReplayCost:
                 sequence.at(target_count=int(count))
             assert len(reductions) == 1
         finally:
-            simplify_module._Engine = original
+            reduction._Engine = original
 
     def test_fifty_asks_in_a_row_allocate_what_one_does(self):
         """Nothing is cached or held between asks, so a slider does not grow."""

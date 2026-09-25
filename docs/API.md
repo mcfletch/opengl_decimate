@@ -3,6 +3,11 @@
 Every public entry point, what it takes and what it hands back. Arrays are
 NumPy; attribute names are glTF's.
 
+The functions and classes in the first sections are imported from the package
+itself. They are defined in `opengl_decimate.reduction` (`simplify`,
+`collapse_sequence`), `opengl_decimate.floors` (`survey`, `Survey`),
+`opengl_decimate.options` and `opengl_decimate.sequence`.
+
 ## `simplify(attributes, indices, options) -> SimplifyResult`
 
 Reduce a mesh to the target `options` names.

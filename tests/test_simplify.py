@@ -5,13 +5,11 @@ implementation: a flat patch is exactly representable by two triangles, a sphere
 of radius one stays a sphere of radius one, a closed surface stays closed.
 """
 
-import importlib
-
 import numpy as np
 import pytest
 import shapes
 
-from opengl_decimate import SimplifyOptions, quadrics, simplify, topology
+from opengl_decimate import SimplifyOptions, quadrics, reduction, simplify, topology
 from opengl_decimate.types import DecimateError
 
 
@@ -665,16 +663,15 @@ class TestSamplingCorners:
         when the pool is empty. Each draw prices one batch, so counting batches
         counts the work.
         """
-        reducing = importlib.import_module('opengl_decimate.simplify')
         batches = 0
-        price = reducing._Engine.candidates
+        price = reduction._Engine.candidates
 
         def counted(engine, pairs):
             nonlocal batches
             batches += 1
             return price(engine, pairs)
 
-        monkeypatch.setattr(reducing._Engine, 'candidates', counted)
+        monkeypatch.setattr(reduction._Engine, 'candidates', counted)
         positions, indices = shapes.icosphere(3)
         edges = topology.build(positions, indices).edges()
         result = simplify(
