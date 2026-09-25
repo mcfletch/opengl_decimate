@@ -110,7 +110,7 @@ class TestTheTwoPathsAgree:
         logs = []
         for run in ('run_native', 'run_heap'):
             mesh = topology.build(positions, indices)
-            engine = reduction._Engine(mesh, SimplifyOptions(target_count=0))
+            engine = reduction._Engine(mesh, SimplifyOptions(target_count=0))  # noqa: SLF001 runs each schedule on an engine of its own
             engine.quadrics[:, 9] = 1e308
             with np.errstate(over='ignore', invalid='ignore'):
                 getattr(engine, run)(0)
@@ -382,9 +382,9 @@ class TestTheBuildContract:
     def test_the_accelerator_can_be_switched_off_by_the_environment(self, monkeypatch):
         """The suite runs both paths, and tox needs a way to demand each one."""
         monkeypatch.setenv('OPENGL_DECIMATE_NO_ACCEL', '1')
-        assert native._load() is None
+        assert native._load() is None  # noqa: SLF001 re-reads the switch the module read at import
         monkeypatch.delenv('OPENGL_DECIMATE_NO_ACCEL')
-        assert native._load() is not None
+        assert native._load() is not None  # noqa: SLF001 re-reads the switch the module read at import
 
     def test_the_compiled_reducer_agrees_on_what_the_classes_mean(self):
         """It compares against the numbers, so the numbers have to be these.

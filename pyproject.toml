@@ -117,6 +117,7 @@ select = [
     "BLE001",  # a bare `except Exception` is a boundary that says why
     "S310",  # a URL is opened only once its scheme is known
     "PLC0415",  # imports at the top of a module, unless a cycle or an optional dependency says otherwise
+    "SLF001",  # a private name is reached only by a white-box test that says why
 ]
 ignore = [
     "E501",   # line too long: held by the formatter's line-length, above

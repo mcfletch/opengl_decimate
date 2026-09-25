@@ -367,7 +367,7 @@ class TestPlacement:
         positions, indices = shapes.tube(noise=1e-5)
         mesh = topology.build(positions, indices)
         edges = mesh.edges()
-        engine = reduction._Engine(mesh, SimplifyOptions(target_ratio=0.5))
+        engine = reduction._Engine(mesh, SimplifyOptions(target_ratio=0.5))  # noqa: SLF001 prices candidates without a reduction
         _, placement = engine.candidates(edges)
         here, there = mesh.positions[edges[:, 0]], mesh.positions[edges[:, 1]]
         away = np.linalg.norm(placement - 0.5 * (here + there), axis=1)
@@ -691,14 +691,14 @@ class TestSamplingCorners:
         counts the work.
         """
         batches = 0
-        price = reduction._Engine.candidates
+        price = reduction._Engine.candidates  # noqa: SLF001 counts the batches the engine prices
 
         def counted(engine, pairs):
             nonlocal batches
             batches += 1
             return price(engine, pairs)
 
-        monkeypatch.setattr(reduction._Engine, 'candidates', counted)
+        monkeypatch.setattr(reduction._Engine, 'candidates', counted)  # noqa: SLF001 counts the batches the engine prices
         positions, indices = shapes.icosphere(3)
         edges = topology.build(positions, indices).edges()
         result = simplify(

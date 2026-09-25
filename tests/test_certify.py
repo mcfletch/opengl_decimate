@@ -295,8 +295,8 @@ class TestTheGridGivesTheSameAnswerAsTheScan:
         rng = np.random.default_rng(3)
         probes = certify.sample_surface(positions, indices, 1500, seed=2)
         probes = probes + rng.normal(scale=spread, size=probes.shape)
-        by_grid = np.sqrt(certify._nearest_by_grid(probes, corners)[0])
-        by_scan = np.sqrt(certify._nearest_among(probes, corners)[0])
+        by_grid = np.sqrt(certify._nearest_by_grid(probes, corners)[0])  # noqa: SLF001 the grid search held to the brute-force scan
+        by_scan = np.sqrt(certify._nearest_among(probes, corners)[0])  # noqa: SLF001 the grid search held to the brute-force scan
         assert np.array_equal(by_grid, by_scan)
 
     def test_one_huge_triangle_among_small_ones_does_not_break_it(self):
@@ -311,8 +311,8 @@ class TestTheGridGivesTheSameAnswerAsTheScan:
         rng = np.random.default_rng(7)
         probes = rng.normal(size=(1200, 3)) * 3.0
         assert np.array_equal(
-            np.sqrt(certify._nearest_by_grid(probes, corners)[0]),
-            np.sqrt(certify._nearest_among(probes, corners)[0]),
+            np.sqrt(certify._nearest_by_grid(probes, corners)[0]),  # noqa: SLF001 the grid search held to the brute-force scan
+            np.sqrt(certify._nearest_among(probes, corners)[0]),  # noqa: SLF001 the grid search held to the brute-force scan
         )
 
     @pytest.mark.parametrize(
@@ -329,12 +329,12 @@ class TestTheGridGivesTheSameAnswerAsTheScan:
     )
     def test_a_cell_size_is_chosen_even_for_a_mesh_with_no_area(self, corners, side):
         low, high = np.min(corners, axis=1), np.max(corners, axis=1)
-        assert certify._grid_side(low, high) == side
+        assert certify._grid_side(low, high) == side  # noqa: SLF001 the cell size no public result carries
 
     def test_a_mesh_of_one_triangle_is_still_a_grid(self):
         probes = np.asarray([(0.25, 0.25, 2.0), (5.0, 0.0, 0.0), (-1.0, 0.5, 0.0)])
         corners = _TRIANGLE[0][_TRIANGLE[1].reshape(-1, 3)]
-        assert np.sqrt(certify._nearest_by_grid(probes, corners)[0]) == pytest.approx(
+        assert np.sqrt(certify._nearest_by_grid(probes, corners)[0]) == pytest.approx(  # noqa: SLF001 the grid search alone, on one triangle
             [2.0, 4.0, 1.0]
         )
 
@@ -380,7 +380,7 @@ class TestWhenToStopSearchingAndJustScan:
 
         through_the_grid = certify.distance_to_mesh(points, positions, indices)
         corners = np.asarray(positions, dtype='d')[np.asarray(indices).reshape(-1, 3)]
-        by_hand = np.sqrt(certify._nearest_among(np.asarray(points, dtype='d'), corners)[0])
+        by_hand = np.sqrt(certify._nearest_among(np.asarray(points, dtype='d'), corners)[0])  # noqa: SLF001 the grid search held to the brute-force scan
         assert np.allclose(through_the_grid, by_hand, atol=1e-9)
 
 

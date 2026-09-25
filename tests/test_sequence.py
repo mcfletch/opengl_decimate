@@ -180,27 +180,24 @@ class TestReplayCost:
     accumulates, and both of those can be asked directly.
     """
 
-    def test_asking_for_a_target_runs_no_reduction(self):
+    def test_asking_for_a_target_runs_no_reduction(self, monkeypatch):
         attributes, indices = _sphere(2)
         sequence = collapse_sequence(attributes, indices)
         reductions = []
-        original = reduction._Engine
+        engine = reduction._Engine  # noqa: SLF001 counts how often a reduction is built
 
-        class Counted(original):  # type: ignore[valid-type, misc]
+        class Counted(engine):  # type: ignore[valid-type, misc]
             def __init__(self, *args, **named):
                 reductions.append(1)
                 super().__init__(*args, **named)
 
-        reduction._Engine = Counted
-        try:
-            # The reduction the sequence was recorded with is the only one.
-            simplify(attributes, indices, SimplifyOptions(target_count=100))
-            assert len(reductions) == 1
-            for count in np.linspace(20, len(indices) // 3 - 20, 50).astype(int):
-                sequence.at(target_count=int(count))
-            assert len(reductions) == 1
-        finally:
-            reduction._Engine = original
+        monkeypatch.setattr(reduction, '_Engine', Counted)
+        # The reduction the sequence was recorded with is the only one.
+        simplify(attributes, indices, SimplifyOptions(target_count=100))
+        assert len(reductions) == 1
+        for count in np.linspace(20, len(indices) // 3 - 20, 50).astype(int):
+            sequence.at(target_count=int(count))
+        assert len(reductions) == 1
 
     def test_fifty_asks_in_a_row_allocate_what_one_does(self):
         """Nothing is cached or held between asks, so a slider does not grow."""
