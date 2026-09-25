@@ -678,9 +678,7 @@ def rewrap_level(reduction: Reduction, results: list) -> tuple[list, int]:
         if not result.triangle_count or 'TEXCOORD_0' not in group.attributes:
             out.append(Rewrapped(result.attributes, result.indices, group.material))
             continue
-        laid = rewrapping.unwrap(
-            result.attributes['POSITION'], result.indices, size=REWRAP_SIZE
-        )
+        laid = rewrapping.unwrap(result.attributes['POSITION'], result.indices, size=REWRAP_SIZE)
         shot = rewrapping.project(
             laid,
             group.attributes['POSITION'],
