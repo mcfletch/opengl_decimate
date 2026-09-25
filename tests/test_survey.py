@@ -138,6 +138,14 @@ class TestWhatItIsGiven:
         with pytest.raises(DecimateError, match='TEXCOORD_0'):
             survey({'POSITION': positions, 'TEXCOORD_0': np.zeros((2, 2))}, indices)
 
+    def test_a_mesh_with_no_triangles_has_nothing_to_reduce(self):
+        report = survey({'POSITION': np.zeros((3, 3), dtype='f4')}, np.array([0, 1, 2]))
+        assert report.triangles == 1
+        assert report.welded_away == 1
+        assert report.pieces == 0
+        assert report.surveyed == 0
+        assert report.reducible == 0.0
+
     def test_it_surveys_the_mesh_the_options_would_reduce(self):
         """A scan is welded and cleaned before it is reduced, and surveyed the same way."""
         attributes, indices = _cards(6)

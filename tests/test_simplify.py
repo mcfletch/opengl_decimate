@@ -560,6 +560,7 @@ class TestRefusedOptions:
             pytest.param({'locked': [-1]}, 'locked', id='locked-negative'),
             pytest.param({'locked': [[0, 1]]}, 'locked', id='locked-nested'),
             pytest.param({'locked': [0.5]}, 'locked', id='locked-not-integers'),
+            pytest.param({'drop_components_below': -0.1}, 'drop_components_below', id='drop'),
         ],
     )
     def test_an_option_outside_its_range_is_refused(self, named, says):

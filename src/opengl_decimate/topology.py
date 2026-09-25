@@ -661,6 +661,9 @@ def _too_small(points: FloatArray, faces: IndexArray, share: float) -> np.ndarra
     The largest component is never among them. A share above one would otherwise
     take the whole model, and a caller who asked for too much wants the subject
     back rather than an empty mesh.
+
+    ``faces`` is not empty, and a face has three distinct welded points, so the
+    model's own diagonal is never zero.
     """
     label = components(faces, len(points))
     low = np.full((len(points), 3), np.inf)
@@ -671,8 +674,6 @@ def _too_small(points: FloatArray, faces: IndexArray, share: float) -> np.ndarra
         reach = np.linalg.norm(high - low, axis=1)
     reach[~np.isfinite(reach)] = 0.0
     whole = float(np.linalg.norm(np.max(points, axis=0) - np.min(points, axis=0)))
-    if not whole > 0.0:
-        return np.zeros(len(faces), dtype=bool)
     per_face = label[faces[:, 0]]
     biggest = int(np.argmax(reach))
     return (reach[per_face] < share * whole) & (per_face != biggest)

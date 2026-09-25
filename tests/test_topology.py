@@ -171,6 +171,16 @@ class TestClassification:
         assert kinds[7] == topology.VertexClass.LOCKED
         assert np.count_nonzero(kinds == topology.VertexClass.LOCKED) == 2
 
+    def test_a_point_past_the_end_is_refused(self):
+        mesh = topology.build(*shapes.octahedron())
+        with pytest.raises(DecimateError, match='6 welded points'):
+            mesh.classify(locked=np.asarray([6], dtype=np.int64))
+
+    def test_a_mesh_with_no_faces_has_no_components_to_join_and_no_charts(self):
+        assert topology.components(np.zeros((0, 3), dtype=np.int64), 3).tolist() == [0, 1, 2]
+        empty = np.zeros((0, 3), dtype=np.int64)
+        assert len(topology.atlas_charts(empty, empty, np.zeros((0, 2)))) == 0
+
 
 def _two_closed_fans():
     """Two closed tetrahedral shells sharing exactly one point.
