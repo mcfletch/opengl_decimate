@@ -275,14 +275,9 @@ def _nearest_by_grid(points: FloatArray, corners: FloatArray) -> tuple[FloatArra
                 # won can be named. The first of a tie will do: they are the
                 # same distance, which is what the answer is about.
                 sizes = np.diff(np.append(starts, len(found)))
-                at_best = np.flatnonzero(found == np.repeat(closest, sizes))
+                at_best = found == np.repeat(closest, sizes)
                 first_best = np.minimum.reduceat(
-                    np.where(
-                        np.isin(np.arange(len(found)), at_best),
-                        np.arange(len(found)),
-                        len(found),
-                    ),
-                    starts,
+                    np.where(at_best, np.arange(len(found)), len(found)), starts
                 )
                 better = closest < best[each]
                 winner[each] = np.where(better, owner[entry[first_best]], winner[each])
