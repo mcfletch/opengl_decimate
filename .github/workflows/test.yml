@@ -20,15 +20,18 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14", "pypy-3.10"]
-        # Wheels are published for three platforms, so a pull request has to
-        # see all three. A full cross-product would be fifteen more jobs for
-        # what is one C compiler and one set of integer widths per platform, so
-        # each of the other two gets the row that also runs lint, types and the
-        # coverage floor.
+        # Wheels are published for four platforms -- Linux, Windows, and macOS
+        # on arm64 and on x86_64 -- so a pull request has to see all four. A
+        # full cross-product would be eighteen more jobs for what is one C
+        # compiler and one set of integer widths per platform, so each of the
+        # other three gets the row that also runs lint, types and the coverage
+        # floor.
         include:
           - os: windows-latest
             python-version: "3.12"
           - os: macos-latest
+            python-version: "3.12"
+          - os: macos-15-intel
             python-version: "3.12"
     steps:
       - uses: actions/checkout@v4
