@@ -47,7 +47,7 @@ that is surveyed. Nothing else in them is read.
 | `open_pieces` | `int` | how many of those have a border |
 | `largest_piece` | `int` | triangles in the largest, which is the subject where the rest are specks |
 | `handles` | `int` | tunnels through the surface, from Euler's formula |
-| `seam_share` | `float` | share of edges whose ends are drawn at different numbers of texture coordinates — what `lock_seams` refuses |
+| `seam_share` | `float` | share of edges whose ends are drawn at different numbers of texture coordinates: the edges leading onto a seam, which `lock_seams` does not contract. Edges along a seam are not counted |
 | `charts` | `int` | pieces the texture atlas is cut into; 0 for a mesh carrying no texture coordinates |
 | `median_chart` | `int` | triangles in the middle chart |
 | `small_chart` | `int` | triangles in the smaller quarter of them |

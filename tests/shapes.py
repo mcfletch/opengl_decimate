@@ -222,6 +222,37 @@ def cone(valence: int = 64):
     return _mesh(positions, faces)
 
 
+def three_charts(side: int = 9, first: int = 3, apart: float = 10.0):
+    """A domed patch unwrapped as three charts, the middle one a column of quads.
+
+    Returns ``(attributes, indices)`` with ``TEXCOORD_0``. Each chart is the
+    patch's own ``(x, z)`` mapped to the unit square and moved ``apart`` along
+    ``u`` per chart, so the chart a coordinate belongs to is ``u // apart``.
+    Every point on a chart boundary is one vertex per chart it is drawn in.
+    """
+    positions, indices = grid(side, bump=0.3)
+    column = np.round((positions[:, 0] + 1.0) * 0.5 * (side - 1)).astype(int)
+    faces = np.asarray(indices, dtype=np.int64).reshape(-1, 3)
+    chart = np.where(
+        column[faces].max(axis=1) <= first,
+        0,
+        np.where(column[faces].min(axis=1) >= first + 1, 2, 1),
+    )
+    drawn = np.unique(np.stack([faces.reshape(-1), np.repeat(chart, 3)], axis=1), axis=0)
+    vertex = {(int(point), int(where)): index for index, (point, where) in enumerate(drawn)}
+    uv = (positions[drawn[:, 0]][:, [0, 2]] + 1.0) * 0.5
+    uv[:, 0] += apart * drawn[:, 1]
+    remapped = [
+        vertex[(int(point), int(where))]
+        for row, where in zip(faces, chart, strict=True)
+        for point in row
+    ]
+    return (
+        {'POSITION': positions[drawn[:, 0]], 'TEXCOORD_0': uv.astype('f4')},
+        np.asarray(remapped, dtype=np.uint32),
+    )
+
+
 def nearly_coincident(count: int = 200, spread: float = 1e-7):
     """A grid whose points are each duplicated a hair away, as a scan's are.
 

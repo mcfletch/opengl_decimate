@@ -112,20 +112,20 @@ class SimplifyOptions:
     :param lock_seams: hold the boundaries of the texture atlas exactly, as
         ``lock_boundary`` holds the outline. A point drawn at several texture
         coordinates -- one position at the end of one chart and the start of the
-        next -- then merges only with a point drawn at the same number, so the
-        seam network stays where the author drew it and the triangles it needs
-        are spent on it.
+        next -- then merges only with a point drawn at the same number, along an
+        edge with a different chart on each side, so the seam network stays
+        where the author drew it and the triangles it needs are spent on it.
 
         Off, which is the default, a seam still keeps each side reading from its
         own chart: a contraction hands each corner the copy nearest in attribute
-        space, and the end drawn at more coordinates keeps them, so neither side
-        is ever left with the other's. What it does not do is hold the seam's
-        *line*, so the coordinate a seam carries slides as the merged point
-        moves. On a model whose atlas is a few large charts that is a fraction
-        of a triangle and holding the seam costs more triangles than it saves.
-        On one whose atlas is thousands of small charts the seam network is most
-        of the surface, and this is the option that decides between a texture
-        that still describes the model and a reduction that reaches its target.
+        space, and the end drawn at more coordinates keeps them. What it does
+        not do is hold the seam's *line*, so the coordinate a seam carries
+        slides as the merged point moves, and where a chart is narrow enough
+        for one edge to join the seams either side of it, a contraction can
+        merge the two and leave a triangle reading two charts. Holding the
+        seams costs the triangles the seam network needs, which is most of the
+        surface on an atlas of thousands of small charts and a small share on
+        one of a few large ones.
     :param schedule: one of :data:`SCHEDULES`.
     :param candidates: how many edges ``multiple-choice`` samples per step.
     :param seed: fixes the sampling, so a run is reproducible.

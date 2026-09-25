@@ -20,8 +20,9 @@ only while all three of its corners are in the same one. A contraction across a
 cut leaves a triangle whose three coordinates point at three unrelated places in
 the atlas, and what it draws is the stripe between them. How soon that starts
 happening is set by how finely the model was cut: ``charts`` counts the pieces
-and ``texture_floor`` is the triangle count they imply. ``seam_share`` is the
-same property seen from the edges, and says what ``lock_seams`` would cost.
+and ``texture_floor`` is the triangle count they imply. ``seam_share`` counts
+the edges leading onto a seam, which ``lock_seams`` holds, and says what that
+option would cost.
 
 :func:`survey` measures all three and puts a floor on what any reduction can
 reach. A caller who finds that floor near the triangle count they started with
@@ -71,8 +72,10 @@ class Survey:
     #: Handles through the surface, from Euler's formula.
     handles: int
     #: The share of edges whose ends are drawn at different numbers of texture
-    #: coordinates -- the boundary of the texture atlas, and what ``lock_seams``
-    #: refuses. Zero for a mesh carrying no texture coordinates.
+    #: coordinates: the edges leading onto a seam from the chart beside it,
+    #: which ``lock_seams`` does not contract. An edge running along a seam has
+    #: the same number at both ends and is not counted. Zero for a mesh
+    #: carrying no texture coordinates.
     seam_share: float
     #: Pieces the texture atlas is cut into. Zero for a mesh carrying no
     #: texture coordinates, which has no atlas to measure.

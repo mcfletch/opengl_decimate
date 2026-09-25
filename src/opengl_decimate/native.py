@@ -96,6 +96,7 @@ def reduce_mesh(
         weights,
         np.ascontiguousarray(kinds, dtype=np.int8),
         np.ascontiguousarray(mesh.copies, dtype=np.int32),
+        np.ascontiguousarray(mesh.charts, dtype=np.int32),
         0 if placement == 'optimal' else 1,
         float(np.cos(np.radians(max_normal_flip))),
         float(min_triangle_quality),

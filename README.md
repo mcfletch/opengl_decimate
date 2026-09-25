@@ -66,9 +66,12 @@ nearest, so a texture coordinate and a normal travel with the position they
 describe. Two corners at the same point with different normals or texture
 coordinates stay two vertices, so a UV seam is still a seam and a hard edge is
 still hard. A corner takes the copy nearest in attribute space and the end drawn
-at more texture coordinates keeps them, so neither side of a seam is ever left
-reading the chart next door; `lock_seams` additionally holds the seam's *line*,
-where the atlas is fragmented enough for that to be worth its triangles.
+at more texture coordinates keeps them, so neither side of a seam is left
+reading the chart next door. The exception is a chart narrow enough that one
+edge joins the seams on either side of it: a contraction along that edge merges
+two seams, and the corners of three charts meet at one point. `lock_seams` holds
+each seam's *line*, which rules that out too, where the atlas is fragmented
+enough for that to be worth its triangles.
 `recompute_normals` replaces `NORMAL` with the normals of the surface that is
 left, which is what a level a game ships wants: a carried normal is the one
 measured at its own vertex and is the *more* accurate of the two, but its error

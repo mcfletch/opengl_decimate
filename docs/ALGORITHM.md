@@ -166,8 +166,10 @@ render inside out there. A face that collapses to a line is refused outright.
 
 **The seam, where `lock_seams` asks for it.** A point drawn at more than one
 texture coordinate may then merge only with a point drawn at the same number,
-which is the same shape of rule as the border one and holds the seam network
-exactly where the author drew it. It is off by default, because step 6 already
+and only along an edge whose two faces are in different charts of the atlas.
+That is the same shape of rule as the border one and holds the seam network
+exactly where the author drew it; the chart test is what stops an edge across a
+narrow chart from taking one seam onto the next. It is off by default, because step 6 already
 keeps each side of a seam reading from its own chart and holding the *line* as
 well costs the triangles the seam network needs — on a coastal cliff scan, the
 difference between reaching five hundred triangles and stopping at two thousand.
@@ -236,9 +238,11 @@ without being locked. The end drawn at **more** texture coordinates wins
 outright, whatever the distance says, because it is the only one with a
 coordinate to give each side of the seam it is on. And where the winning end
 carries several copies, the corner takes the one nearest in attribute space,
-which is the copy on its own side of the seam. So a triangle is never left
-reading the chart next door; what it can do is read a coordinate measured a
-little along from where it now is, which is what `lock_seams` refuses.
+which is the copy on its own side of the seam. So a triangle is not left reading
+the chart next door, with one exception: a chart narrow enough that one edge
+joins the seams either side of it, where contracting that edge merges the two
+seams. What a triangle can also do is read a coordinate measured a little along
+from where it now is. `lock_seams` refuses both.
 
 These handovers are recorded alongside the contractions, in
 [`opengl_decimate.corners`](../src/opengl_decimate/corners.py), so that they

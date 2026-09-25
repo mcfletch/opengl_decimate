@@ -255,3 +255,43 @@ class TestASeamStaysASeam:
                 int(np.sum(still)),
             )
             assert np.any(wander), 'nothing drifted at %d, so the case is not covered' % (target,)
+
+
+class TestANarrowChart:
+    """Three charts side by side, the middle one a single column of quads wide.
+
+    Every point on either edge of the middle chart is drawn twice, so two
+    points on opposite sides of it are drawn at the same number of texture
+    coordinates. A contraction between them runs across the chart rather than
+    along a seam, and takes one seam onto the other.
+    """
+
+    #: How far apart the charts are laid in the atlas, in ``u``.
+    APART = 10.0
+
+    @classmethod
+    def _three_charts(cls):
+        return shapes.three_charts(apart=cls.APART)
+
+    @classmethod
+    def _torn(cls, attributes, indices):
+        """Triangles whose corners read from more than one chart."""
+        along = np.asarray(attributes['TEXCOORD_0'], dtype='d')[np.asarray(indices).reshape(-1, 3)]
+        chart = np.floor(along[:, :, 0] / cls.APART + 0.5)
+        return chart.min(axis=1) != chart.max(axis=1)
+
+    def test_the_source_mesh_is_three_clean_charts(self):
+        attributes, indices = self._three_charts()
+        assert not np.any(self._torn(attributes, indices))
+
+    def test_lock_seams_keeps_each_seam_on_its_own_side_of_the_chart(self):
+        attributes, indices = self._three_charts()
+        for target in (120, 80, 40):
+            result = simplify(
+                attributes, indices, SimplifyOptions(target_count=target, lock_seams=True)
+            )
+            torn = self._torn(*_mesh_of(result))
+            assert not np.any(torn), '%d triangles: %d read two charts' % (
+                result.triangle_count,
+                int(np.sum(torn)),
+            )

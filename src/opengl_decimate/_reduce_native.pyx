@@ -278,6 +278,7 @@ cdef class Reducer:
     cdef double[::1] weights
     cdef signed char[::1] kinds
     cdef int[::1] copies
+    cdef int[::1] charts
 
     # Faces on a point: `head[v]` is an incidence, `nxt`/`prv` chain them. An
     # incidence is `face * 3 + slot`, so the point it belongs to is always
@@ -367,6 +368,7 @@ cdef class Reducer:
         double[::1] weights,
         signed char[::1] kinds,
         int[::1] copies,
+        int[::1] charts,
         int placement_mode,
         double max_flip_cos,
         double min_quality,
@@ -380,6 +382,7 @@ cdef class Reducer:
         self.weights = weights
         self.kinds = kinds
         self.copies = copies
+        self.charts = charts
         self.placement_mode = placement_mode
         self.max_flip_cos = max_flip_cos
         self.min_quality = min_quality
@@ -867,6 +870,12 @@ cdef class Reducer:
             # changes -- and the coordinate it carries was measured where the
             # seam used to be.
             if self.copies[a] != self.copies[b]:
+                continue
+            # And only along a seam: an edge with a different chart on each
+            # side. Across a chart, it would take one seam onto another.
+            if self.copies[a] > 1 and (
+                    edge_faces != 2
+                    or self.charts[self.on_edge.data[0]] == self.charts[self.on_edge.data[1]]):
                 continue
             can_a = self.kinds[a] != 2 and (
                 self.kinds[a] != 1 or edge_faces == 1)

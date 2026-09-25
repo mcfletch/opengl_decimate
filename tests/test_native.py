@@ -84,6 +84,14 @@ class TestTheTwoPathsAgree:
             pure.attributes['POSITION'], abs=1e-9
         )
 
+    def test_they_agree_on_locked_seams(self):
+        attributes, indices = shapes.three_charts()
+        compiled, pure = _both(
+            attributes, indices, SimplifyOptions(target_count=40, lock_seams=True)
+        )
+        assert np.array_equal(compiled.indices, pure.indices)
+        assert np.array_equal(compiled.attributes['TEXCOORD_0'], pure.attributes['TEXCOORD_0'])
+
     def test_they_agree_on_endpoint_placement(self):
         positions, indices = shapes.icosphere(2)
         compiled, pure = _both(

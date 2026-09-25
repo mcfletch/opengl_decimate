@@ -245,6 +245,7 @@ class Topology:
         input_faces: int | None = None,
         dropped_faces: int = 0,
         copies: IndexArray | None = None,
+        charts: IndexArray | None = None,
     ) -> None:
         self.positions = np.ascontiguousarray(positions, dtype='d')
         #: What ``positions`` are measured from; zero for a model near it.
@@ -261,6 +262,14 @@ class Topology:
             np.ones(len(self.positions), dtype=np.int32)
             if copies is None
             else np.ascontiguousarray(copies, dtype=np.int32)
+        )
+        #: Which piece of the texture atlas each face is laid out in -- see
+        #: :func:`atlas_charts`. One chart for a mesh whose seams were not
+        #: asked about, so no edge is between two.
+        self.charts = (
+            np.zeros(len(self.faces), dtype=np.int64)
+            if charts is None
+            else np.ascontiguousarray(charts, dtype=np.int64)
         )
         #: Triangles the caller handed in, before welding dropped any. A ratio
         #: is a share of these, which is what a caller counted; ``face_count``
@@ -351,6 +360,14 @@ class Topology:
     def edge_faces(self, left: int, right: int) -> set[int]:
         """The live faces using both ends of an edge."""
         return self.vertex_faces[left] & self.vertex_faces[right]
+
+    def along_a_seam(self, left: int, right: int) -> bool:
+        """True where the edge has a face on each side and they are in different charts."""
+        on_edge = self.edge_faces(left, right)
+        if len(on_edge) != 2:
+            return False
+        first, second = on_edge
+        return bool(self.charts[first] != self.charts[second])
 
     def is_boundary_edge(self, left: int, right: int) -> bool:
         """True where exactly one face uses the edge, so the surface stops there."""
@@ -706,10 +723,11 @@ def build(
     pixel where the whole model covers a hundred. The largest component is never
     dropped, whatever share is asked for.
 
-    ``carried`` is what the mesh's vertices hold besides their positions. It is
-    read only to count how many different sets of values each point is drawn
-    with, which is where the surface's seams are; without it every point counts
-    as drawn once and a reduction is free to collapse across them.
+    ``carried`` is what the mesh's vertices hold besides their positions. Its
+    texture coordinates are read to count how many different ones each point is
+    drawn with, and to find the chart of the atlas each face is in, which is
+    where the surface's seams are; without it every point counts as drawn once,
+    every face is in one chart, and a reduction is free to collapse across them.
     """
     positions = np.asarray(positions)
     if positions.ndim != 2 or positions.shape[1] != 3:
@@ -748,6 +766,16 @@ def build(
         if np.any(small):
             dropped = int(np.count_nonzero(small))
             faces, corners = faces[~small], corners[~small]
+    copies = charts = None
+    if carried is not None:
+        copies = copies_per_point(vertex_point, corners, carried, len(points))
+        mapped = [
+            np.asarray(value, dtype='d').reshape(len(positions), -1)
+            for name, value in sorted(carried.items())
+            if name.startswith('TEXCOORD')
+        ]
+        if mapped:
+            charts = atlas_charts(faces, corners, np.concatenate(mapped, axis=1))
     return Topology(
         points - origin,
         faces,
@@ -756,9 +784,6 @@ def build(
         origin,
         input_faces=len(flat) // 3,
         dropped_faces=dropped,
-        copies=(
-            None
-            if carried is None
-            else copies_per_point(vertex_point, corners, carried, len(points))
-        ),
+        copies=copies,
+        charts=charts,
     )

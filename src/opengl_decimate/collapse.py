@@ -71,7 +71,10 @@ def is_legal(mesh: Topology, kinds: np.ndarray, dying: int, surviving: int) -> b
     returned. A locked point never dies; a border point dies only along its
     border, which is what holds a patch's outline in place; and a point drawn at
     several texture coordinates merges only with a point drawn at the same
-    number, which holds a texture seam on its own line.
+    number, along an edge with a different chart on each side, which holds a
+    texture seam on its own line. The chart test is what keeps two seams apart:
+    the points either side of a narrow chart are drawn at two coordinates each,
+    and an edge across the chart joins them without running along either seam.
     """
     if dying == surviving:
         return False
@@ -83,6 +86,8 @@ def is_legal(mesh: Topology, kinds: np.ndarray, dying: int, surviving: int) -> b
     if kinds[dying] == VertexClass.BORDER and len(on_edge) != 1:
         return False
     if mesh.copies[dying] != mesh.copies[surviving]:
+        return False
+    if mesh.copies[dying] > 1 and not mesh.along_a_seam(dying, surviving):
         return False
     if not link_condition(mesh, dying, surviving):
         return False
