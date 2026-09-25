@@ -7,6 +7,7 @@
 # the suite, its configuration and the documentation it cites all ship.
 recursive-include tests *.py
 include tox.ini
+include CHANGELOG.md
 recursive-include docs *.md
 
 # The gallery's pictures are the documentation's, not the package's: five

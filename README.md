@@ -238,6 +238,7 @@ metre.
   [`tools/gallery.py`](tools/gallery.py).
 - [docs/API.md](docs/API.md) — every entry point, with its units and defaults.
 - [docs/ALGORITHM.md](docs/ALGORITHM.md) — what each step does and why.
+- [CHANGELOG.md](CHANGELOG.md) — what each release changed.
 
 ## Licence
 
