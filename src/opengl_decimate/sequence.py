@@ -289,6 +289,8 @@ def _emit(
     if not len(flat_points):
         empty = {name: value[:0].copy() for name, value in attributes.items()}
         empty[POSITION] = np.zeros((0, 3), dtype=place_dtype)
+        if recompute_normals:
+            empty['NORMAL'] = np.zeros((0, 3), dtype='f4')
         return SimplifyResult(
             attributes=empty,
             indices=np.zeros((0,), dtype=np.uint32),

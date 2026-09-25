@@ -239,7 +239,7 @@ class TestAttributes:
         assert np.all(outward > 0.5)
 
     def test_a_texture_seam_does_not_become_a_shading_seam(self):
-        """Recomputed normals are accumulated per point, not per output vertex.
+        """Recomputed normals are accumulated per smoothing group, not per output vertex.
 
         An output vertex is split by *attributes*, so a texture seam splits one.
         Accumulating there would give each side of the split only the faces on
@@ -273,6 +273,15 @@ class TestAttributes:
         normals = result.attributes['NORMAL']
         assert normals.shape == result.attributes['POSITION'].shape
         assert np.linalg.norm(normals, axis=1) == pytest.approx(1.0, abs=1e-5)
+
+    def test_an_empty_result_still_carries_the_normals_it_was_asked_for(self):
+        result = simplify(
+            {'POSITION': np.zeros((0, 3), dtype='f4')},
+            np.zeros((0,), dtype=np.uint32),
+            SimplifyOptions(target_ratio=0.5, recompute_normals=True),
+        )
+        assert result.attributes['NORMAL'].shape == (0, 3)
+        assert result.attributes['NORMAL'].dtype == np.float32
 
     def test_the_vertex_map_points_every_input_vertex_at_an_output_vertex(self):
         positions, indices = shapes.icosphere(2)
