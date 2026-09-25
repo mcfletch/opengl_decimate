@@ -1021,6 +1021,13 @@ def render_subject(reduction: Reduction, probe: Any, models: str) -> None:
         )
 
 
+def _replace_text(path: str, text: str) -> None:
+    """Replace the file at `path` with `text`: written beside it, then renamed over it."""
+    with open(path + '.part', 'w', encoding='utf-8') as handle:
+        handle.write(text)
+    os.replace(path + '.part', path)
+
+
 def _read(path: str) -> Any:
     """A written PNG back as an ``(n, n, 3)`` array, for the contact sheet."""
     image = ensure_pillow()
@@ -1424,8 +1431,7 @@ def write_readme(reductions: list) -> None:
         return
     head, rest = text.split(START, 1)
     _stale, tail = rest.split(END, 1)
-    with open(path, 'w', encoding='utf-8') as handle:
-        handle.write(head + readme_block(reductions) + tail)
+    _replace_text(path, head + readme_block(reductions) + tail)
     print('wrote %s' % (path,))
 
 
@@ -1508,8 +1514,7 @@ def main(argv: list | None = None) -> int:
     os.makedirs(DOCS, exist_ok=True)
     if whole:
         described = '\n\n'.join(part for part in (machine, credits(reductions)) if part)
-        with open(os.path.join(DOCS, 'GALLERY.md'), 'w', encoding='utf-8') as handle:
-            handle.write(page(reductions, described))
+        _replace_text(os.path.join(DOCS, 'GALLERY.md'), page(reductions, described))
         print('wrote %s' % (os.path.join(DOCS, 'GALLERY.md'),))
         if not options.no_render:
             write_readme(reductions)
@@ -1565,12 +1570,13 @@ def write_measurements(reductions: list, whole: bool) -> None:
     # dropped, and the file is then one run behind rather than unwritable.
     order = [s.slug for s in SUBJECTS]
     place = {slug: at for at, slug in enumerate(order)}
-    with open(path, 'w', encoding='utf-8') as handle:
-        json.dump(
+    _replace_text(
+        path,
+        json.dumps(
             sorted(held.values(), key=lambda entry: place.get(entry['subject'], len(order))),
-            handle,
             indent=2,
-        )
+        ),
+    )
 
 
 if __name__ == '__main__':
