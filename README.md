@@ -147,11 +147,14 @@ At least one, and the reduction stops at whichever is reached first.
 | `max_normal_flip` | `90.0` | degrees a face's normal may turn |
 | `min_triangle_quality` | `0.0` | shape floor, 0 (any) to 1 (equilateral only) |
 | `placement` | `'optimal'` | `'endpoint'` keeps every point exactly where it was |
+| `lock_seams` | `False` | hold the seams of the texture atlas on their own lines |
 | `weld_tolerance` | `0.0` | merge input vertices within this distance first |
+| `drop_components_below` | `0.0` | remove connected pieces smaller than this share of the bounding-box diagonal first |
 | `schedule` | `'heap'` | `'multiple-choice'` samples instead of ordering |
 | `candidates` | `8` | how many edges `multiple-choice` draws per step |
 | `seed` | `0` | fixes the sampling, so a run repeats exactly |
 | `recompute_normals` | `False` | recompute `NORMAL` for the surface that is left, adding it where the input had none |
+| `crease_angle` | `60.0` | degrees past which a recomputed normal keeps an edge hard |
 | `certify` | `False` | measure the deviation into `measured_error` |
 | `certify_samples` | `4000` | points taken from each surface when certifying |
 
@@ -202,6 +205,8 @@ metre.
 - Where no compiler was available at install time the NumPy contraction loop is
   used for both schedules. It is the same reduction and the same answer, at a
   speed that suits a model rather than a scan. A wheel carries the compiled one.
+  `opengl_decimate.native.ACCELERATED` says whether it is in use, and setting
+  `OPENGL_DECIMATE_NO_ACCEL=1` before import switches it off.
 - An open surface cannot be reduced past its own boundaries. A hole in the
   surface keeps at least three vertices around it, and each separate open piece
   keeps at least one triangle, so a mesh of many small open shells stops well

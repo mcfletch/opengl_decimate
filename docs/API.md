@@ -99,17 +99,18 @@ zero.
 | `min_triangle_quality` | `float` | `0.0` | shape floor: 0 admits any shape, 1 only equilateral |
 | `crease_angle` | `float` | `60.0` | where `recompute_normals` keeps an edge hard, in degrees. Corners further apart than this are not accumulated into one normal. Where the input carries normals they answer alone — they say which edges a model is *smooth* across as well; a mesh with none is asked about its own folds. Zero is flat shading, 180 smooths everything. Read only when `recompute_normals` is on |
 | `placement` | `str` | `'optimal'` | `'optimal'` minimises the summed quadric; `'endpoint'` keeps whichever end of the edge costs less, so every output point is an input point |
-| `lock_seams` | `bool` | `False` | hold the boundaries of the texture atlas exactly, as `lock_boundary` holds the outline: a point drawn at several texture coordinates then merges only with a point drawn at the same number. Off, each side of a seam still reads from its own chart — a corner takes the copy nearest in attribute space, and the end drawn at more coordinates keeps them — but the seam's *line* is not held, so the coordinate it carries slides as the merged point moves. Worth its triangles where the atlas is thousands of small charts and that sliding is most of the surface |
+| `lock_seams` | `bool` | `False` | hold the boundaries of the texture atlas exactly, as `lock_boundary` holds the outline: a point drawn at several texture coordinates then merges only with a point drawn at the same number, along an edge with a different chart on each side. Off, each side of a seam still reads from its own chart — a corner takes the copy nearest in attribute space, and the end drawn at more coordinates keeps them — but the seam's *line* is not held, so the coordinate it carries slides as the merged point moves, and a contraction across a chart narrow enough for one edge to join its two seams leaves triangles reading two charts. Worth its triangles where the atlas is thousands of small charts and that sliding is most of the surface |
 
 ### How it runs
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `weld_tolerance` | `float` | `0.0` | merge input vertices within this distance before reducing |
+| `drop_components_below` | `float` | `0.0` | remove whole connected pieces smaller than this share of the model's bounding-box diagonal before reducing; the largest piece is never removed. `0.01` is about a pixel where the model covers a hundred |
 | `schedule` | `str` | `'heap'` | `'heap'` or `'multiple-choice'` |
 | `candidates` | `int` | `8` | edges `multiple-choice` draws per step |
 | `seed` | `int` | `0` | fixes the sampling, so a run repeats exactly |
-| `recompute_normals` | `bool` | `False` | replace `NORMAL` with the normals of the surface that is left, adding the attribute where the input carried none. Accumulated per point, so vertices split by a texture seam share a normal |
+| `recompute_normals` | `bool` | `False` | replace `NORMAL` with the normals of the surface that is left, adding the attribute where the input carried none. Accumulated per smoothing group — the corners around a point that the model is smooth across, bounded by the input's own normals and by `crease_angle` — so a texture seam does not become a crease and a hard edge stays hard |
 | `certify` | `bool` | `False` | measure the deviation of the result and put it in `measured_error` |
 | `certify_samples` | `int` | `4000` | points taken from each surface when certifying |
 
@@ -125,6 +126,7 @@ zero.
 | `collapses` | `int` | contractions applied |
 | `input_triangles` | `int` | triangles the caller handed in, which is what `target_ratio` is a share of |
 | `welded_away` | `int` | input triangles welding dropped before the reduction began, because their corners landed on the same point |
+| `dropped_away` | `int` | input triangles `drop_components_below` removed before the reduction began |
 | `triangle_count` | `int` | triangles in the result |
 
 Output vertices are numbered by first use in the index stream, so the caller's
@@ -157,6 +159,24 @@ The mesh after `steps` contractions, in the package's internal form: welded poin
 positions, the point each original point has become, and the live faces with the
 input vertex each corner reads its attributes from — which is a vertex measured
 where the corner now sits, not the vertex it started as.
+
+## `opengl_decimate.native`
+
+Whether the compiled reducer is in use. A wheel carries it; a source install
+builds it where a C compiler is available and otherwise installs without it.
+
+- `ACCELERATED` — `True` where the compiled reducer was built and is not
+  switched off. The `heap` schedule and the corner handover then run in C;
+  otherwise the NumPy loop runs, with the same results, at a speed that suits
+  a model rather than a scan.
+- `OPENGL_DECIMATE_NO_ACCEL` — set to any non-empty value before the package is
+  imported to use the NumPy loop even where the compiled one is built.
+
+```python
+from opengl_decimate import native
+
+native.ACCELERATED    # False: a scan will be slow here
+```
 
 ## `opengl_decimate.certify`
 

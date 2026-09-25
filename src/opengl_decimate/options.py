@@ -132,9 +132,10 @@ class SimplifyOptions:
     :param recompute_normals: replace ``NORMAL`` with the normals of the surface
         that is left, rather than carrying the input's. The result carries a
         ``NORMAL`` whether or not the input did, so a mesh of positions alone
-        comes back with one. Normals are accumulated per point, so vertices
-        split by a texture seam still share a normal and the seam stays a
-        texture seam rather than becoming a crease.
+        comes back with one. Normals are accumulated per smoothing group: the
+        corners around a point that the model is smooth across, bounded by the
+        input's own normals and by ``crease_angle``. Vertices split only by a
+        texture seam share a normal, so the seam does not become a crease.
     :param certify: measure the deviation of the result from the input and put
         it in ``measured_error``. Off by default: it samples both surfaces and
         measures each sample against the other, which costs about what the

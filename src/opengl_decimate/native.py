@@ -1,9 +1,10 @@
 """Whether the compiled reducer is here, and running a reduction through it.
 
 The package installs and works without a compiler. Where the accelerator built,
-a reduction on the ``heap`` schedule runs through it instead of through the
-NumPy loop -- the same algorithm, the same order, the same result, at a size
-the NumPy loop cannot reach.
+a reduction on the ``heap`` schedule, and the corner handover every recorded
+reduction works out, run through it instead of through NumPy and Python -- the
+same algorithm, the same order, the same result, at a size the NumPy loop
+cannot reach.
 
     >>> isinstance(ACCELERATED, bool)
     True
