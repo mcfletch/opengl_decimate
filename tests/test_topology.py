@@ -5,6 +5,8 @@ whose answers are settled by inspection -- a closed tetrahedron has no border, a
 grid's rim is all border, a bowtie vertex is not on a surface at all.
 """
 
+import tracemalloc
+
 import numpy as np
 import pytest
 import shapes
@@ -300,8 +302,6 @@ class TestAdjacencyIsNotBuiltUntilItIsWanted:
     """
 
     def test_building_a_mesh_does_not_build_the_adjacency(self):
-        import tracemalloc
-
         positions, indices = shapes.grid(300)  # 90,000 points
         tracemalloc.start()
         try:

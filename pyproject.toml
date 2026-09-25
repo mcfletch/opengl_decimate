@@ -114,6 +114,9 @@ select = [
     "S110", "S112", "TRY400",  # an error that is caught is not silently dropped
     "DTZ",  # datetimes carry a timezone
     "S102", "S202", "S301", "S307",  # no exec, eval, pickle or unchecked tar extraction
+    "BLE001",  # a bare `except Exception` is a boundary that says why
+    "S310",  # a URL is opened only once its scheme is known
+    "PLC0415",  # imports at the top of a module, unless a cycle or an optional dependency says otherwise
 ]
 ignore = [
     "E501",   # line too long: held by the formatter's line-length, above

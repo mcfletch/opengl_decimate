@@ -15,6 +15,7 @@ lets the suite run both and hold them to the same answers.
 
 from __future__ import annotations
 
+import importlib
 import os
 from typing import Any
 
@@ -32,8 +33,6 @@ def _load() -> Any:
     try:
         # Imported by name rather than from the package, because it is built
         # only where a compiler was and a checker cannot see it at all.
-        import importlib
-
         return importlib.import_module('opengl_decimate._reduce_native')
     except ImportError:  # pragma: no cover - depends on the build
         return None

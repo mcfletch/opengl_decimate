@@ -5,6 +5,8 @@ out, has an edge on three triangles, or has two triangles occupying the same
 place. Each test here is one of those outcomes, set up so it would happen.
 """
 
+import tracemalloc
+
 import numpy as np
 import pytest
 import shapes
@@ -202,8 +204,6 @@ class TestCostOfOneContraction:
         return mesh, middle, int(next(iter(mesh.neighbours(middle))))
 
     def test_testing_the_placement_allocates_a_neighbourhood_not_a_mesh(self):
-        import tracemalloc
-
         mesh, dying, surviving = self._big()
         placement = mesh.positions[surviving]
         tracemalloc.start()
@@ -216,8 +216,6 @@ class TestCostOfOneContraction:
         assert peak < 200_000, 'allocated %.1f MB to test one contraction' % (peak / 1e6)
 
     def test_applying_it_allocates_a_neighbourhood_not_a_mesh(self):
-        import tracemalloc
-
         mesh, dying, surviving = self._big()
         placement = mesh.positions[surviving]
         tracemalloc.start()
@@ -230,8 +228,6 @@ class TestCostOfOneContraction:
 
     def test_counting_the_live_faces_does_not_scan_them(self):
         """It is asked once per contraction, so it cannot be a pass over the mesh."""
-        import tracemalloc
-
         mesh, dying, surviving = self._big()
         before = mesh.face_count
         collapse.contract(mesh, dying, surviving, mesh.positions[surviving])

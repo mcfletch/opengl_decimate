@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from opengl_decimate import quadrics
+from opengl_decimate.options import DEFAULT_NORMAL_NOISE
 
 
 def _plane(normal, point):
@@ -166,8 +167,6 @@ class TestProbabilistic:
         Six coplanar triangles around a point, at the noise the options default
         to. The minimum is within the fan, at its own plane.
         """
-        from opengl_decimate.options import DEFAULT_NORMAL_NOISE
-
         angles = np.linspace(0.0, 2.0 * np.pi, 7)[:-1]
         rim = np.stack([np.cos(angles), np.zeros(6), np.sin(angles)], axis=1)
         q = quadrics.plane_quadric(

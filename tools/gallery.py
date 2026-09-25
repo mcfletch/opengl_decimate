@@ -29,17 +29,34 @@ it costs a line.
 from __future__ import annotations
 
 import argparse
+import copy
+import hashlib
 import json
 import math
 import os
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+from OpenGLContext import capture as capturing
+from OpenGLContext.capture import ensure_pillow
+from OpenGLContext.loaders.assets import merged_by_material, shapes
+from OpenGLContext.loaders.gltf import load_gltf
+from OpenGLContext.loaders.gltf.writer import ExternalImage, SceneNode, write_glb
+from OpenGLContext.scenegraph.pbrmesh import PBRMesh
+from OpenGLContext.testing.glcontext import describe_gl, hidden_window
+from OpenGLContext_editor.assets import polyhaven
+from OpenGLContext_editor.meshlod.chain import bounding_sphere
+from OpenGLContext_editor.meshlod.quality import LODProbe, pop_breakdown
+
+from opengl_decimate import SimplifyOptions, collapse_sequence, corners, topology
+from opengl_decimate import certify as certification
+from opengl_decimate import survey as surveying
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -326,8 +343,6 @@ def shape_of(groups: list) -> tuple[int, int, float]:
     slides as the merged point moves, and ``lock_seams`` is what refuses it at
     the price of the triangles the seam network needs.
     """
-    from opengl_decimate import corners, topology
-
     pieces = handles = 0
     held = total = 0
     for group in groups:
@@ -378,7 +393,7 @@ def view_radius(positions: Any, centre: Any, yaw: float) -> float:
 
 def peak_rss_mb() -> float:
     """High-water mark of this process's resident memory."""
-    import resource
+    import resource  # noqa: PLC0415 POSIX only, and only this measurement wants it
 
     peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     # Linux reports kilobytes; macOS reports bytes.
@@ -398,9 +413,6 @@ def fetch(source: str) -> str:
         return path
 
     slug = source.split(':', 1)[1]
-    sys.path.insert(0, os.path.join(os.path.dirname(ROOT), 'openglcontext-editor', 'src'))
-    from OpenGLContext_editor.assets import polyhaven
-
     entry = polyhaven.files(slug)['gltf']['1k']['gltf']
     directory = os.path.join(CACHE, slug)
     document = _save(entry['url'], os.path.join(directory, os.path.basename(entry['url'])))
@@ -413,9 +425,16 @@ def _save(url: str, path: str) -> str:
     if os.path.exists(path) and os.path.getsize(path):
         return path
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    # The URL comes from the Poly Haven API, and only a download is wanted of it.
+    if urllib.parse.urlsplit(url).scheme != 'https':
+        raise SystemExit('refusing to fetch %r, which is not an https URL' % (url,))
     print('   fetching %s' % (os.path.basename(path),), flush=True)
-    request = urllib.request.Request(url, headers={'User-Agent': 'opengl_decimate gallery'})
-    with urllib.request.urlopen(request) as response, open(path + '.part', 'wb') as out:
+    headers = {'User-Agent': 'opengl_decimate gallery'}
+    request = urllib.request.Request(url, headers=headers)  # noqa: S310 https checked above
+    with (
+        urllib.request.urlopen(request) as response,  # noqa: S310 https checked above
+        open(path + '.part', 'wb') as out,
+    ):
         while True:
             block = response.read(1 << 20)
             if not block:
@@ -432,9 +451,6 @@ def load(path: str) -> tuple[list, int]:
     draws with one material, so that is as far as the pieces can be brought
     together without losing what the model looks like.
     """
-    from OpenGLContext.loaders.assets import merged_by_material, shapes
-    from OpenGLContext.loaders.gltf import load_gltf
-
     scene = load_gltf(path, max_resource_bytes=None)
     grouped = merged_by_material(scene.group)
     if not grouped:
@@ -474,11 +490,6 @@ def ladder(triangles: int, stop_below: int = 0) -> list:
 
 def reduce_subject(subject: Subject, certify: bool) -> Reduction:
     """Decimate one subject once per material, and read every level off it."""
-    from OpenGLContext_editor.meshlod.chain import bounding_sphere
-
-    from opengl_decimate import SimplifyOptions, collapse_sequence, topology
-    from opengl_decimate import certify as certification
-
     print('== %s ==' % (subject.title,), flush=True)
     path = fetch(subject.source)
     start = time.perf_counter()
@@ -550,8 +561,6 @@ def reduce_subject(subject: Subject, certify: bool) -> Reduction:
     out.pieces, out.handles, out.seam_share = shape_of(groups)
     # The atlas is a property of the whole model, and the group that carries
     # most of it decides whether a level's texture can still describe it.
-    from opengl_decimate import survey as surveying
-
     biggest = max(grouped, key=lambda group: len(group[2]))
     read = surveying(biggest[1], biggest[2])
     out.charts, out.texture_floor = read.charts, read.texture_floor
@@ -668,10 +677,10 @@ def rewrap_level(reduction: Reduction, results: list) -> tuple[list, int]:
     Returns the groups and how many texels were projected, which is what the
     step costs.
     """
-    import copy
-
-    from OpenGLContext_editor.assets import rewrap as rewrapping
-    from PIL import Image
+    # The rewrap extra of OpenGLContext-editor brings both of these, and only a
+    # subject marked ``rewrap`` needs it, so the rest of the page builds without.
+    from OpenGLContext_editor.assets import rewrap as rewrapping  # noqa: PLC0415 optional extra
+    from PIL import Image  # noqa: PLC0415 optional extra
 
     out, texels = [], 0
     for group, result in zip(reduction.groups, results, strict=True):
@@ -758,11 +767,6 @@ def externalise(material: Any, where: str, slug: str, seen: dict) -> Any:
     ladder changes -- whereupon a later run finds the name and keeps the old
     picture.
     """
-    import copy
-    import hashlib
-
-    from OpenGLContext.loaders.gltf.writer import ExternalImage
-
     if material is None:
         return None
     key = id(material)
@@ -789,9 +793,6 @@ def externalise(material: Any, where: str, slug: str, seen: dict) -> Any:
 
 def write_level(reduction: Reduction, level: Level, where: str) -> str:
     """One level as a ``.glb``, its materials naming textures written beside it."""
-    from OpenGLContext.loaders.gltf.writer import SceneNode, write_glb
-    from OpenGLContext.scenegraph.pbrmesh import PBRMesh
-
     # A rewrapped level is drawn from its own atlas and its own material; every
     # other one is the replayed result wearing the group's material.
     drawn = level.rewrapped or [
@@ -875,8 +876,6 @@ def merged_level(level: Level) -> tuple:
     For measuring and for the triangle view, where the materials are not the
     question and one array pair is easier to hand to the probe.
     """
-    import numpy as np
-
     positions = np.concatenate([result.attributes['POSITION'] for result in level.results])
     normals = np.concatenate([result.attributes['NORMAL'] for result in level.results])
     offset, joined = 0, []
@@ -914,8 +913,6 @@ def choose_distances(reduction: Reduction, probe: Any) -> None:
     that changed, because the two want different remedies: a moved outline needs
     triangles, changed shading needs a normal map.
     """
-    from OpenGLContext_editor.meshlod.quality import pop_breakdown
-
     source = merged_level(reduction.levels[0])
     # A chain has to be ordered: a coarser level is never usable closer than a
     # finer one, whatever a sampled deviation happened to measure. Taking the
@@ -963,8 +960,6 @@ def choose_distances(reduction: Reduction, probe: Any) -> None:
 
 def render_subject(reduction: Reduction, probe: Any, models: str) -> None:
     """Draw every level twice: as the game would, and as triangles."""
-    from OpenGLContext import capture as capturing
-
     subject = reduction.subject
     os.makedirs(PICTURES, exist_ok=True)
     choose_distances(reduction, probe)
@@ -1028,9 +1023,6 @@ def render_subject(reduction: Reduction, probe: Any, models: str) -> None:
 
 def _read(path: str) -> Any:
     """A written PNG back as an ``(n, n, 3)`` array, for the contact sheet."""
-    import numpy as np
-    from OpenGLContext.capture import ensure_pillow
-
     image = ensure_pillow()
     if image is None:
         return np.zeros((CELL, CELL, 3), dtype=np.uint8)
@@ -1447,12 +1439,8 @@ def credits(reductions: list) -> str:
 
 def describe_machine() -> str:
     """What rendered these, since a frame rate means nothing without it."""
-    try:
-        from OpenGLContext.testing.glcontext import describe_gl
-
-        return str(describe_gl())
-    except Exception:
-        return 'no GL context'
+    description = describe_gl()
+    return str(description) if description is not None else 'no GL context'
 
 
 def main(argv: list | None = None) -> int:
@@ -1499,9 +1487,6 @@ def main(argv: list | None = None) -> int:
     )
 
     if not options.no_render:
-        from OpenGLContext.testing.glcontext import hidden_window
-        from OpenGLContext_editor.meshlod.quality import LODProbe
-
         # Each level is written here as a glb so `oglc-view` can draw it with
         # its own materials. They are a step on the way to the pictures, not
         # something the repository wants, so they live in the cache.

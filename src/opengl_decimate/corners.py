@@ -203,7 +203,7 @@ def _ends_given_up(
 ) -> tuple[IndexArray, IndexArray]:
     """:func:`ends_given_up_in_python`, through the compiled reducer where it built."""
     # Imported here: `native` imports `topology`, which imports this module.
-    from opengl_decimate import native
+    from opengl_decimate import native  # noqa: PLC0415 cycle native -> topology -> corners
 
     if native.ACCELERATED:
         return native.ends_given_up(points, placement, dying, surviving, charts, point_count)

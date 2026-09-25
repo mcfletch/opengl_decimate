@@ -7,6 +7,8 @@ distances that can be worked out on paper, then check the whole measure against
 shapes whose deviation is known.
 """
 
+import tracemalloc
+
 import numpy as np
 import pytest
 import shapes
@@ -255,8 +257,6 @@ class TestMeasuringABigSurface:
     """
 
     def test_measuring_against_a_dense_mesh_stays_within_a_budget(self):
-        import tracemalloc
-
         positions, indices = shapes.icosphere(5)  # 20,480 triangles
         points = certify.sample_surface(positions, indices, 2000, seed=1)
         tracemalloc.start()

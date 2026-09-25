@@ -36,7 +36,7 @@ class build_ext(_build_ext):
     def run(self):
         try:
             super().run()
-        except Exception as error:  # pragma: no cover - toolchain
+        except Exception as error:  # noqa: BLE001 any toolchain failure leaves NumPy  # pragma: no cover
             self.warn(
                 'the optional accelerator did not build (%s); the NumPy '
                 'reduction will be used instead' % (error,)
@@ -45,7 +45,7 @@ class build_ext(_build_ext):
     def build_extension(self, ext):
         try:
             super().build_extension(ext)
-        except Exception as error:  # pragma: no cover - toolchain
+        except Exception as error:  # noqa: BLE001 any toolchain failure leaves NumPy  # pragma: no cover
             self.warn(
                 '%s did not build (%s); the NumPy reduction will be used '
                 'instead' % (ext.name, error)
