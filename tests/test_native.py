@@ -21,6 +21,7 @@ from opengl_decimate import (
     collapse_sequence,
     corners,
     native,
+    reduction,
     simplify,
     topology,
 )
@@ -98,6 +99,23 @@ class TestTheTwoPathsAgree:
         )
         assert np.array_equal(compiled.indices, pure.indices)
         assert np.array_equal(compiled.attributes['TEXCOORD_0'], pure.attributes['TEXCOORD_0'])
+
+    def test_they_agree_on_a_price_that_overflows(self):
+        """A pair whose quadric value overflows is priced at infinity, and neither queues it.
+
+        Two triangles and four quadrics each holding half the largest double, so
+        every pair's sum overflows and there is nothing to contract.
+        """
+        positions, indices = shapes.grid(2)
+        logs = []
+        for run in ('run_native', 'run_heap'):
+            mesh = topology.build(positions, indices)
+            engine = reduction._Engine(mesh, SimplifyOptions(target_count=0))
+            engine.quadrics[:, 9] = 1e308
+            with np.errstate(over='ignore', invalid='ignore'):
+                getattr(engine, run)(0)
+            logs.append(len(engine.record({'POSITION': positions})))
+        assert logs == [0, 0]
 
     def test_they_agree_on_endpoint_placement(self):
         positions, indices = shapes.icosphere(2)

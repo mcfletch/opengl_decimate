@@ -40,7 +40,7 @@ of the pair's ends.
 import numpy as np
 
 cimport numpy as cnp
-from libc.math cimport fabs, sqrt
+from libc.math cimport fabs, isfinite, sqrt
 from libc.limits cimport INT_MAX
 from libc.stdlib cimport free, malloc, qsort, realloc
 
@@ -654,7 +654,12 @@ cdef class Reducer:
         return False
 
     cdef double _price(self, int a, int b, double* place) noexcept nogil:
-        """The deviation contracting (a, b) would cost, and where it would land."""
+        """The deviation contracting (a, b) would cost, and where it would land.
+
+        -1 where nothing may be placed, or where the price is not finite: a
+        quadric whose value overflows prices nothing, as the NumPy reducer's
+        ``isfinite`` test has it.
+        """
         cdef double q[10]
         cdef int i
         cdef double best = 0.0, cost
@@ -712,7 +717,10 @@ cdef class Reducer:
         cdef double weight = self.weights[a] + self.weights[b]
         if weight < TINY:
             weight = TINY
-        return sqrt(best / weight)
+        cdef double deviation = sqrt(best / weight)
+        if not isfinite(deviation):
+            return -1.0
+        return deviation
 
     cdef bint _near_the_edge(self, int a, int b, double* point) noexcept nogil:
         """No further from the midpoint than the edge is long, as ``reduction._near_the_edge``."""
