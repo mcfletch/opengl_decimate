@@ -368,47 +368,50 @@ class _Engine:
     def run_multiple_choice(self, limit: int) -> None:
         """Contract the cheapest of a few candidates drawn at random.
 
-        The pool is the set of pairs worth considering. A pair that is no longer
-        an edge is dropped when it is drawn rather than hunted for, which is what
-        keeps every step the same size.
+        The pool is the set of pairs worth considering. A pair leaves it when it
+        is drawn and not contracted: no longer an edge, priced out, over the
+        error budget, or refused by the rules. Nothing about such a pair changes
+        until one of its ends survives a contraction -- its price is its two
+        ends' quadrics and positions -- and the survivor's pairs are put back
+        when that happens, as the heap re-queues them. So every pair drawn is
+        either contracted or set aside, the pool runs dry exactly when nothing
+        is left to contract, and the work is bounded by the pairs that ever
+        entered it.
+
+        The error budget filters candidates rather than ending the reduction.
+        These are a few edges drawn at random out of thousands, so the cheapest
+        of them is over budget long before the cheapest on the mesh is, and
+        ending there would stop wherever the draw happened to fall.
         """
         rng = np.random.default_rng(self.options.seed)
         pool = [_pair(int(a), int(b)) for a, b in self.mesh.edges()]
         known = set(pool)
-        failures = 0
-        budget = max(1000, 20 * len(pool))
 
-        while pool and self.mesh.face_count > limit and failures < budget:
-            drawn = np.unique(rng.integers(len(pool), size=min(self.options.candidates, len(pool))))
-            for slot in sorted(drawn, reverse=True):
-                if not self.mesh.edge_faces(*pool[slot]):
-                    known.discard(pool[slot])
-                    pool[slot] = pool[-1]
-                    pool.pop()
-            live = [int(slot) for slot in drawn if slot < len(pool)]
-            pairs = np.asarray([pool[slot] for slot in live], dtype=np.int64).reshape(-1, 2)
+        while pool and self.mesh.face_count > limit:
+            slots = np.unique(rng.integers(len(pool), size=min(self.options.candidates, len(pool))))
+            drawn = [pool[slot] for slot in slots]
+            live = [rank for rank, pair in enumerate(drawn) if self.mesh.edge_faces(*pair)]
+            spent = [int(slots[rank]) for rank in range(len(drawn)) if rank not in live]
+            pairs = np.asarray([drawn[rank] for rank in live], dtype=np.int64).reshape(-1, 2)
             deviation, placement = self.candidates(pairs)
-            applied = False
+            contracted = False
             for rank in np.argsort(deviation, kind='stable'):
-                if not np.isfinite(deviation[rank]):
-                    break
-                # The budget filters candidates; it does not end the reduction.
-                # These are a few edges drawn at random out of thousands, so the
-                # cheapest of them is over budget long before the cheapest on the
-                # mesh is -- ending here would stop at whatever the draw happened
-                # to be, which is a different answer for every seed. A draw with
-                # nothing affordable in it counts as a failure, and it is the
-                # failure budget below that decides there is nothing left to do.
-                if self.error_limit is not None and deviation[rank] > self.error_limit:
-                    break
+                affordable = np.isfinite(deviation[rank]) and (
+                    self.error_limit is None or deviation[rank] <= self.error_limit
+                )
                 left, right = int(pairs[rank, 0]), int(pairs[rank, 1])
-                if self.try_contract(left, right, placement[rank], float(deviation[rank])):
-                    applied = True
+                spent.append(int(slots[live[rank]]))
+                if affordable and self.try_contract(
+                    left, right, placement[rank], float(deviation[rank])
+                ):
+                    contracted = True
                     break
-            if not applied:
-                failures += 1
+            for slot in sorted(spent, reverse=True):
+                known.discard(pool[slot])
+                pool[slot] = pool[-1]
+                pool.pop()
+            if not contracted:
                 continue
-            failures = 0
             surviving = self._surviving[-1]
             for point in self.mesh.neighbours(surviving):
                 key = _pair(surviving, int(point))

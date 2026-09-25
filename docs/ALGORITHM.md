@@ -195,11 +195,15 @@ the last.
 
 **`multiple-choice`** draws a few candidates at random and contracts the cheapest
 of them. There is no global ordering to maintain and no queue to keep, every step
-costs the same as every other, and the quality loss is small. A pair that is no
-longer an edge is dropped when it is drawn rather than hunted for.
+costs the same as every other, and the quality loss is small. A pair drawn and
+not contracted -- no longer an edge, over the error budget, or refused by
+step 4 -- leaves the pool until one of its ends survives a contraction,
+which is the only event that changes it. The reduction ends when the pool is
+empty, so reaching the floor costs a bounded number of draws rather than a run
+of failures.
 
-Giving up the global ordering is the point: it is what makes a reduction
-divisible, and it is the schedule a parallel or GPU implementation is built on.
+Giving up the global ordering makes a reduction divisible, so this is the
+schedule a parallel or GPU implementation is built on.
 
 **Only `heap` has the compiled loop.** `multiple-choice` runs the NumPy
 implementation whether or not the accelerator is installed, so as it stands it

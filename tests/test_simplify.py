@@ -5,6 +5,8 @@ implementation: a flat patch is exactly representable by two triangles, a sphere
 of radius one stays a sphere of radius one, a closed surface stays closed.
 """
 
+import importlib
+
 import numpy as np
 import pytest
 import shapes
@@ -626,6 +628,34 @@ class TestSamplingCorners:
         assert min(sampled) >= heap
         assert max(sampled) < 1.5 * heap
         assert max(sampled) - min(sampled) < 0.25 * heap
+
+    def test_the_work_to_reach_the_floor_is_linear_in_the_edges(self, monkeypatch):
+        """Once nothing is left to contract, the sampler stops rather than drawing on.
+
+        A pair drawn and passed over cannot change until one of its ends survives
+        a contraction, so it leaves the pool until then, and the reduction ends
+        when the pool is empty. Each draw prices one batch, so counting batches
+        counts the work.
+        """
+        reducing = importlib.import_module('opengl_decimate.simplify')
+        batches = 0
+        price = reducing._Engine.candidates
+
+        def counted(engine, pairs):
+            nonlocal batches
+            batches += 1
+            return price(engine, pairs)
+
+        monkeypatch.setattr(reducing._Engine, 'candidates', counted)
+        positions, indices = shapes.icosphere(3)
+        edges = topology.build(positions, indices).edges()
+        result = simplify(
+            {'POSITION': positions},
+            indices,
+            SimplifyOptions(target_count=0, schedule='multiple-choice'),
+        )
+        assert result.triangle_count == 4
+        assert batches < 4 * len(edges)
 
     def test_the_sampling_schedule_stops_when_nothing_is_left_to_do(self):
         """Every remaining pair has both ends locked, so no draw can succeed."""
