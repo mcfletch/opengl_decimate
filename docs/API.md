@@ -216,9 +216,16 @@ welded points; `Topology.vertex_point` maps each input vertex to its point.
 
 `drop_below` removes whole connected components smaller than that share of the
 model's bounding-box diagonal; the largest is never dropped. `carried` is what
-the vertices hold besides their positions, read only to fill `Topology.copies` —
-how many different sets of values each point is drawn with, which is where the
-surface's seams are. Without it every point counts as drawn once.
+the vertices hold besides their positions. Its texture coordinates are read to
+fill `Topology.copies` — how many different ones each point is drawn with,
+which is where the surface's seams are — and `Topology.charts`, the atlas chart
+of each face (`atlas_charts`). Without it every point counts as drawn once and
+every face is in one chart.
+
+### `positions_of(attributes) -> ndarray`
+
+`POSITION`, once every attribute has been checked to be one row per vertex;
+raises `DecimateError` otherwise. `simplify` and `survey` both start here.
 
 `Topology.positions` are held relative to `Topology.origin` — see
 `local_origin` below. `CollapseSequence.state` adds it back, so a caller of
