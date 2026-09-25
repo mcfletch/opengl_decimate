@@ -198,13 +198,16 @@ metre.
 - Where no compiler was available at install time the NumPy contraction loop is
   used for both schedules. It is the same reduction and the same answer, at a
   speed that suits a model rather than a scan. A wheel carries the compiled one.
-- **An open surface cannot be reduced past its own boundaries.** Each border loop
-  has a floor of three vertices, so a mesh of many small open shells stops well
+- An open surface cannot be reduced past its own boundaries. A hole in the
+  surface keeps at least three vertices around it, and each separate open piece
+  keeps at least one triangle, so a mesh of many small open shells stops well
   above any target. A tree trunk with 246 branch stubs stops at 738 triangles
   whatever it is asked for, because that is three vertices per loop. Joining
   points that are not edges is what gets below it, and is not implemented.
-- A reduction run to exhaustion will take a closed surface down to nothing. Give
-  it a target, or lock what has to stay.
+  `drop_components_below` removes small pieces before the reduction starts.
+- A closed piece stops at four triangles, a tetrahedron, and a piece with a
+  handle stops at whatever it takes to go round the handle. `survey` reports
+  those floors before a reduction is run.
 
 ## Documentation
 

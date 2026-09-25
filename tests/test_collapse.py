@@ -36,6 +36,21 @@ class TestLinkCondition:
         mesh = topology.build(*_tent())
         assert collapse.link_condition(mesh, 1, 2) == collapse.link_condition(mesh, 2, 1)
 
+    def test_the_last_triangle_of_an_open_piece_stays(self):
+        """Every edge of a lone triangle is on its border, so the piece is one loop of three.
+
+        Contracting any of them would take the whole piece off the surface,
+        which is a change of topology the link condition exists to refuse.
+        """
+        positions = np.asarray([(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)], dtype='f4')
+        mesh = topology.build(positions, np.asarray([0, 1, 2], dtype=np.uint32))
+        assert not any(collapse.link_condition(mesh, int(a), int(b)) for a, b in mesh.edges())
+
+    def test_a_border_edge_of_a_larger_patch_still_contracts(self):
+        mesh = topology.build(*shapes.grid(3))
+        assert mesh.is_boundary_edge(0, 1)
+        assert collapse.link_condition(mesh, 0, 1)
+
 
 class TestLegality:
     def test_a_locked_vertex_never_dies(self):

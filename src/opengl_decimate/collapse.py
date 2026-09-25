@@ -42,12 +42,26 @@ def link_condition(mesh: Topology, dying: int, surviving: int) -> bool:
     the points joined to both ends are precisely the points opposite the edge --
     a shared neighbour anywhere else becomes, after the merge, an edge carrying
     three triangles.
+
+    An open surface is read as closed by a virtual point beyond its border,
+    joined to every border point. That point is opposite every border edge, so
+    the test above already holds for it, with one exception: where both other
+    edges of a border edge's triangle are on the border too, the virtual point
+    and the triangle's third corner are joined to both ends *and* to each other.
+    That triangle is the last of its piece, and contracting it would remove the
+    piece, so it is refused and an open piece keeps at least one triangle.
     """
     shared = mesh.neighbours(dying) & mesh.neighbours(surviving)
+    on_edge = mesh.edge_faces(dying, surviving)
     opposite: set[int] = set()
-    for face in mesh.edge_faces(dying, surviving):
+    for face in on_edge:
         opposite.update(int(point) for point in mesh.faces[face] if point not in (dying, surviving))
-    return shared == opposite
+    if shared != opposite:
+        return False
+    if len(on_edge) != 1:
+        return True
+    (third,) = opposite
+    return not (mesh.is_boundary_edge(dying, third) and mesh.is_boundary_edge(surviving, third))
 
 
 def is_legal(mesh: Topology, kinds: np.ndarray, dying: int, surviving: int) -> bool:

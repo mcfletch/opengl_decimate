@@ -142,7 +142,11 @@ Five questions, all asked every time, because the cases they catch are not rare
 
 **The link condition.** Contracting is safe exactly when the points joined to
 both ends of the edge are precisely the points opposite it. A shared neighbour
-anywhere else becomes, after the merge, an edge carrying three triangles.
+anywhere else becomes, after the merge, an edge carrying three triangles. An
+open surface is treated as closed by a virtual point joined to every border
+point, which adds one refusal: a border edge whose triangle has its other two
+edges on the border as well. That triangle is the last one of its piece, so an
+open piece keeps at least one triangle and a closed one at least four.
 
 **No duplicate face.** The link condition alone lets a small closed shape fold
 onto itself: a tetrahedron contracts to two triangles back to back, which passes

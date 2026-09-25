@@ -9,9 +9,10 @@ to reach for a reduction or for a different tool.
 """
 
 import numpy as np
+import pytest
 import shapes
 
-from opengl_decimate import survey
+from opengl_decimate import SimplifyOptions, native, simplify, survey
 
 
 def _cards(count=50, seed=0):
@@ -123,6 +124,37 @@ class TestWhatStopsAReduction:
         assert report.welded_away == 1
         assert report.pieces == 1
         assert report.points == 6
+
+
+class TestTheFloorIsWhereAReductionStops:
+    """The floor is a promise about the reducer, so it is held against one.
+
+    Each mesh is reduced with a target of nothing, on both schedules and on both
+    reducers, and has to stop exactly where the survey said it would.
+    """
+
+    @pytest.mark.parametrize(
+        'mesh',
+        [
+            pytest.param(shapes.grid(10), id='open-patch'),
+            pytest.param(shapes.grid(2), id='two-triangles'),
+            pytest.param(shapes.icosphere(2), id='closed-shell'),
+            pytest.param(_cards(6), id='loose-cards'),
+        ],
+    )
+    @pytest.mark.parametrize('schedule', ['heap', 'multiple-choice'])
+    @pytest.mark.parametrize('compiled', [True, False], ids=['compiled', 'numpy'])
+    def test_an_exhaustive_reduction_stops_at_the_floor(
+        self, mesh, schedule, compiled, monkeypatch
+    ):
+        if compiled and not native.ACCELERATED:
+            pytest.skip('accelerator not built')
+        monkeypatch.setattr(native, 'ACCELERATED', compiled)
+        attributes, indices = mesh
+        if not isinstance(attributes, dict):
+            attributes = {'POSITION': attributes}
+        result = simplify(attributes, indices, SimplifyOptions(target_count=0, schedule=schedule))
+        assert result.triangle_count == survey(attributes, indices).floor
 
 
 class TestHowTheAtlasIsCutUp:

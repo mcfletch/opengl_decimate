@@ -448,6 +448,17 @@ cdef class Reducer:
             incidence = self.nxt[incidence]
         return found
 
+    cdef int _count_on_edge(self, int a, int b) noexcept nogil:
+        """How many live faces use both ends, without disturbing ``on_edge``."""
+        cdef int incidence = self.head[a], face, found = 0
+        while incidence >= 0:
+            face = incidence // 3
+            if (self.faces[face, 0] == b or self.faces[face, 1] == b
+                    or self.faces[face, 2] == b):
+                found += 1
+            incidence = self.nxt[incidence]
+        return found
+
     cdef int _ring(self, int point, IntPool* out) noexcept nogil:
         """Fill ``out`` with the points joined to ``point``; return how many.
 
@@ -513,7 +524,16 @@ cdef class Reducer:
                     if pool_append(&self.opposite, opposite, point) < 0:
                         return -1
                     opposite += 1
-        return 1 if shared == opposite else 0
+        if shared != opposite:
+            return 0
+        # The border form, as in `collapse.link_condition`: a border edge whose
+        # triangle has its other two edges on the border too is the last
+        # triangle of its piece.
+        if edge_faces == 1 and opposite == 1:
+            point = self.opposite.data[0]
+            if self._count_on_edge(a, point) == 1 and self._count_on_edge(b, point) == 1:
+                return 0
+        return 1
 
     cdef int _affected(self, int a, int b, int edge_faces) noexcept nogil:
         """Fill ``touched`` with the faces that outlive a contraction of (a, b)."""
