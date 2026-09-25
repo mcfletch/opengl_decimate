@@ -237,6 +237,28 @@ class TestTheCompiledPathKeepsTheInvariants:
                 assert index in mesh.vertex_faces[point]
 
 
+class TestTheCostOfAHighValence:
+    def test_a_pole_costs_in_proportion_to_its_faces(self):
+        """A pole sixteen times the valence costs about sixteen times as much.
+
+        The neighbourhood of a point is gathered, deduplicated and compared on
+        every candidate that touches it, so any step quadratic in the valence
+        makes this ratio two hundred and fifty-six. The bound leaves room for
+        a busy machine and none for a quadratic.
+        """
+
+        def reduce_seconds(valence):
+            positions, indices = shapes.cone(valence)
+            best = float('inf')
+            for _ in range(3):
+                start = time.perf_counter()
+                simplify({'POSITION': positions}, indices, SimplifyOptions(target_count=8))
+                best = min(best, time.perf_counter() - start)
+            return best
+
+        assert reduce_seconds(16000) < 64 * reduce_seconds(1000)
+
+
 class TestItSharesTheInterpreter:
     def test_the_loop_does_not_shut_the_interpreter_out(self):
         """The contraction loop releases the GIL, so a worker thread is usable.

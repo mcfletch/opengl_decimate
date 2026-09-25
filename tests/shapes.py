@@ -201,6 +201,27 @@ def tube(around: int = 48, along: int = 40, noise: float = 0.0, seed: int = 0):
     return _mesh(positions, faces)
 
 
+def cone(valence: int = 64):
+    """A closed cone on a flat base: a rim of ``valence`` points and two poles.
+
+    The apex and the centre of the base each carry ``valence`` faces, which is
+    what a lathed solid and a fan-triangulated cap present to a reducer. The
+    base is flat, so its spokes cost nothing and are contracted early.
+    """
+    angle = np.linspace(0.0, 2.0 * np.pi, valence, endpoint=False)
+    rim = np.stack([np.cos(angle), np.sin(angle), np.zeros(valence)], axis=1)
+    positions = np.concatenate([rim, [[0.0, 0.0, 1.0], [0.0, 0.0, 0.0]]])
+    here = np.arange(valence)
+    beside = (here + 1) % valence
+    faces = np.concatenate(
+        [
+            np.stack([here, beside, np.full(valence, valence)], axis=1),
+            np.stack([beside, here, np.full(valence, valence + 1)], axis=1),
+        ]
+    )
+    return _mesh(positions, faces)
+
+
 def nearly_coincident(count: int = 200, spread: float = 1e-7):
     """A grid whose points are each duplicated a hair away, as a scan's are.
 

@@ -41,7 +41,8 @@ import numpy as np
 
 cimport numpy as cnp
 from libc.math cimport fabs, sqrt
-from libc.stdlib cimport free, malloc, realloc
+from libc.limits cimport INT_MAX
+from libc.stdlib cimport free, malloc, qsort, realloc
 
 cnp.import_array()
 
@@ -289,6 +290,11 @@ cdef class Reducer:
     # superseded by the one queued at the time it moved, and is passed over --
     # which is what a map from edge to version would otherwise be needed for.
     cdef int* version
+    # Marks a point as met by the current walk: `stamp[p] == epoch`. Starting a
+    # walk is one increment, so deduplicating a neighbourhood or intersecting
+    # two costs what the neighbourhoods hold rather than their product.
+    cdef int* stamp
+    cdef int epoch
 
     cdef Py_ssize_t point_count
     cdef Py_ssize_t face_count
@@ -311,6 +317,7 @@ cdef class Reducer:
     cdef IntPool on_edge
     cdef IntPool moving
     cdef IntPool ring
+    cdef IntPool pairs
 
     # The log.
     cdef int* log_dying
@@ -333,6 +340,8 @@ cdef class Reducer:
         self.on_edge.data = NULL; self.on_edge.capacity = 0
         self.moving.data = NULL; self.moving.capacity = 0
         self.ring.data = NULL; self.ring.capacity = 0
+        self.pairs.data = NULL; self.pairs.capacity = 0
+        self.stamp = NULL
         self.log_dying = NULL
         self.log_surviving = NULL
         self.log_place = NULL
@@ -341,6 +350,7 @@ cdef class Reducer:
 
     def __dealloc__(self):
         free(self.head); free(self.nxt); free(self.prv); free(self.version)
+        free(self.stamp); free(self.pairs.data)
         free(self.ring_a.data); free(self.ring_b.data); free(self.opposite.data)
         free(self.touched.data); free(self.on_edge.data)
         free(self.moving.data); free(self.ring.data)
@@ -384,12 +394,15 @@ cdef class Reducer:
         self.prv = <int*> malloc(3 * self.face_count * sizeof(int))
         self.removed_at = <cnp.int64_t*> malloc(self.face_count * sizeof(cnp.int64_t))
         self.version = <int*> malloc(self.point_count * sizeof(int))
+        self.stamp = <int*> malloc(self.point_count * sizeof(int))
         if not self.head or not self.nxt or not self.prv or not self.removed_at \
-                or not self.version:
+                or not self.version or not self.stamp:
             raise MemoryError('could not allocate the adjacency')
         for i in range(self.point_count):
             self.head[i] = -1
             self.version[i] = 0
+            self.stamp[i] = 0
+        self.epoch = 0
         for i in range(self.face_count):
             self.removed_at[i] = -1
             if alive[i]:
@@ -403,7 +416,8 @@ cdef class Reducer:
                 or pool_reserve(&self.touched, SCRATCH) < 0
                 or pool_reserve(&self.on_edge, SCRATCH) < 0
                 or pool_reserve(&self.moving, SCRATCH) < 0
-                or pool_reserve(&self.ring, SCRATCH) < 0):
+                or pool_reserve(&self.ring, SCRATCH) < 0
+                or pool_reserve(&self.pairs, 2 * SCRATCH) < 0):
             raise MemoryError('could not allocate the working buffers')
 
         self.log_capacity = 1024
@@ -459,31 +473,36 @@ cdef class Reducer:
             incidence = self.nxt[incidence]
         return found
 
+    cdef int _next_epoch(self) noexcept nogil:
+        """Start a walk: a stamp no point carries yet."""
+        cdef Py_ssize_t i
+        if self.epoch == INT_MAX:
+            for i in range(self.point_count):
+                self.stamp[i] = 0
+            self.epoch = 0
+        self.epoch += 1
+        return self.epoch
+
     cdef int _ring(self, int point, IntPool* out) noexcept nogil:
         """Fill ``out`` with the points joined to ``point``; return how many.
 
-        Duplicates are removed by a linear scan, which is the right shape here:
-        a point has a handful of neighbours, and sorting them would cost more
-        than comparing them.
+        Each point found is stamped with this walk's epoch, which is what
+        removes the duplicates, and the stamps stay for the caller to test
+        membership against until the next walk begins.
         """
-        cdef int incidence = self.head[point], face, slot, other, i
+        cdef int incidence = self.head[point], face, slot, other
         cdef int found = 0
-        cdef bint seen
+        cdef int epoch = self._next_epoch()
         while incidence >= 0:
             face = incidence // 3
             for slot in range(3):
                 other = self.faces[face, slot]
-                if other == point:
+                if other == point or self.stamp[other] == epoch:
                     continue
-                seen = False
-                for i in range(found):
-                    if out.data[i] == other:
-                        seen = True
-                        break
-                if not seen:
-                    if pool_append(out, found, other) < 0:
-                        return -1
-                    found += 1
+                self.stamp[other] = epoch
+                if pool_append(out, found, other) < 0:
+                    return -1
+                found += 1
             incidence = self.nxt[incidence]
         return found
 
@@ -495,18 +514,17 @@ cdef class Reducer:
         """
         cdef int count_a = self._ring(a, &self.ring_a)
         cdef int count_b = self._ring(b, &self.ring_b)
-        cdef int i, j, shared = 0
+        cdef int i, shared = 0
         cdef int opposite = 0, face, slot, point, k
         cdef bint counted
 
         if count_a < 0 or count_b < 0:
             return -1
 
+        # `ring_b` was walked last, so its points carry the current epoch.
         for i in range(count_a):
-            for j in range(count_b):
-                if self.ring_a.data[i] == self.ring_b.data[j]:
-                    shared += 1
-                    break
+            if self.stamp[self.ring_a.data[i]] == self.epoch:
+                shared += 1
         # Distinct points opposite the edge. Two faces sharing one is a pillow,
         # and leaving it to the count is what refuses it.
         for i in range(edge_faces):
@@ -556,24 +574,40 @@ cdef class Reducer:
                 incidence = self.nxt[incidence]
         return found
 
-    cdef bint _would_duplicate(self, int a, int b, int count) noexcept nogil:
-        """Two surviving faces landing on the same three points."""
-        cdef int i, j, fi, fj, s
-        cdef int pi[3]
-        cdef int pj[3]
+    cdef int _would_duplicate(self, int a, int b, int count) noexcept nogil:
+        """Two surviving faces landing on the same three points.
+
+        Once ``a`` is ``b``, every face that outlives the contraction has ``b``
+        as one corner, so it is named by its other two. Those pairs are sorted
+        and a repeat is a duplicate face. 1 where there is one, 0 where not,
+        -1 where the buffer could not be grown.
+        """
+        cdef int i, s, fi, point, low, high, found
+        if pool_reserve(&self.pairs, 2 * count) < 0:
+            return -1
         for i in range(count):
             fi = self.touched.data[i]
+            found = 0
+            low = high = -1
             for s in range(3):
-                pi[s] = b if self.faces[fi, s] == a else self.faces[fi, s]
-            _sort3(pi)
-            for j in range(i + 1, count):
-                fj = self.touched.data[j]
-                for s in range(3):
-                    pj[s] = b if self.faces[fj, s] == a else self.faces[fj, s]
-                _sort3(pj)
-                if pi[0] == pj[0] and pi[1] == pj[1] and pi[2] == pj[2]:
-                    return True
-        return False
+                point = self.faces[fi, s]
+                if point == a or point == b:
+                    continue
+                if found == 0:
+                    low = point
+                else:
+                    high = point
+                found += 1
+            if low > high:
+                low, high = high, low
+            self.pairs.data[2 * i] = low
+            self.pairs.data[2 * i + 1] = high
+        qsort(self.pairs.data, count, 2 * sizeof(int), _pair_order)
+        for i in range(1, count):
+            if (self.pairs.data[2 * i] == self.pairs.data[2 * i - 2]
+                    and self.pairs.data[2 * i + 1] == self.pairs.data[2 * i - 1]):
+                return 1
+        return 0
 
     cdef bint _would_distort(self, int a, int b, double* place, int count) noexcept nogil:
         """A face turned past the limit, thinned past the floor, or vanished."""
@@ -801,7 +835,7 @@ cdef class Reducer:
         """The contraction loop. 0 when it finished, -1 out of memory."""
         cdef double cost, fresh
         cdef int a, b, dying, surviving, edge_faces, affected, i, other
-        cdef int queued_a, queued_b, linked
+        cdef int queued_a, queued_b, linked, duplicate
         cdef double place[3]
         cdef double current[3]
         cdef int ring_count
@@ -852,7 +886,10 @@ cdef class Reducer:
             affected = self._affected(a, b, edge_faces)
             if affected < 0:
                 return -1
-            if self._would_duplicate(dying, surviving, affected):
+            duplicate = self._would_duplicate(dying, surviving, affected)
+            if duplicate < 0:
+                return -1
+            if duplicate:
                 continue
             place[0] = current[0]; place[1] = current[1]; place[2] = current[2]
             if self._would_distort(dying, surviving, place, affected):
@@ -925,26 +962,21 @@ cdef class Reducer:
         return dying, surviving, place, deviation, removed
 
 
+cdef int _int_order(const void* left, const void* right) noexcept nogil:
+    cdef int a = (<const int*> left)[0], b = (<const int*> right)[0]
+    return (a > b) - (a < b)
+
+
+cdef int _pair_order(const void* left, const void* right) noexcept nogil:
+    cdef const int* a = <const int*> left
+    cdef const int* b = <const int*> right
+    if a[0] != b[0]:
+        return (a[0] > b[0]) - (a[0] < b[0])
+    return (a[1] > b[1]) - (a[1] < b[1])
+
+
 cdef inline void _sort_ints(int* values, int count) noexcept nogil:
-    """Insertion sort: a point has a handful of neighbours, never a heap of them."""
-    cdef int i, j, held
-    for i in range(1, count):
-        held = values[i]
-        j = i - 1
-        while j >= 0 and values[j] > held:
-            values[j + 1] = values[j]
-            j -= 1
-        values[j + 1] = held
-
-
-cdef inline void _sort3(int* values) noexcept nogil:
-    cdef int swap
-    if values[0] > values[1]:
-        swap = values[0]; values[0] = values[1]; values[1] = swap
-    if values[1] > values[2]:
-        swap = values[1]; values[1] = values[2]; values[2] = swap
-    if values[0] > values[1]:
-        swap = values[0]; values[0] = values[1]; values[1] = swap
+    qsort(values, count, sizeof(int), _int_order)
 
 
 cdef inline void _normal(double corners[3][3], double* out) noexcept nogil:
