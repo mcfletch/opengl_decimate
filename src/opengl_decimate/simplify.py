@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import heapq
 import itertools
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import numpy as np
@@ -145,8 +145,9 @@ class _Engine:
         self.origin_positions = mesh.positions.copy()
         self.origin_faces = mesh.faces.copy()
         self.origin_corners = mesh.corners.copy()
-        locked = None if options.locked is None else np.asarray(options.locked, dtype=np.int64)
-        self.kinds = mesh.classify(lock_boundary=options.lock_boundary, locked=locked)
+        self.kinds = mesh.classify(
+            lock_boundary=options.lock_boundary, locked=_locked_points(mesh, options.locked)
+        )
 
         diagonal = _diagonal(mesh.positions)
         position_noise, normal_noise = options.noise(diagonal)
@@ -460,6 +461,25 @@ class _Engine:
             input_faces=self.mesh.input_faces,
             dropped_faces=self.mesh.dropped_faces,
         )
+
+
+def _locked_points(mesh: Topology, locked: Sequence[int] | None) -> IndexArray | None:
+    """The welded points holding the caller's ``locked`` vertices.
+
+    The caller names vertices of the arrays they handed in. Welding merges
+    every vertex that shares a position -- each side of a texture seam, each
+    face of a hard edge -- and numbers the points by first appearance, so
+    after the first merged vertex the two numberings differ.
+    """
+    if locked is None:
+        return None
+    held = np.asarray(locked, dtype=np.int64).reshape(-1)
+    if held.size and int(held.max()) >= len(mesh.vertex_point):
+        raise DecimateError(
+            'locked index %d is past the end: the mesh has %d vertices'
+            % (int(held.max()), len(mesh.vertex_point))
+        )
+    return mesh.vertex_point[held]
 
 
 def _pair(left: int, right: int) -> tuple[int, int]:

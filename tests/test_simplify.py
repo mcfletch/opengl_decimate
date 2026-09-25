@@ -556,16 +556,44 @@ class TestRefusedOptions:
 class TestRefusedInput:
     def test_a_locked_index_past_the_end_is_refused(self):
         positions, indices = shapes.octahedron()
-        with pytest.raises(DecimateError, match='6 welded points'):
+        with pytest.raises(DecimateError, match='6 vertices'):
             simplify(
                 {'POSITION': positions}, indices, SimplifyOptions(target_ratio=0.5, locked=[99])
             )
 
-    def test_the_message_counts_welded_points_not_the_callers_vertices(self):
-        """A hard-edged cube is 24 vertices over 8 points, and `locked` is by point."""
+    def test_the_message_counts_the_callers_vertices_not_the_welded_points(self):
+        """A hard-edged cube is 24 vertices over 8 points, and `locked` is by vertex."""
         attributes, indices = shapes.cube_with_hard_normals()
-        with pytest.raises(DecimateError, match='8 welded points'):
-            simplify(attributes, indices, SimplifyOptions(target_ratio=0.5, locked=[20]))
+        with pytest.raises(DecimateError, match='24 vertices'):
+            simplify(attributes, indices, SimplifyOptions(target_ratio=0.5, locked=[24]))
+
+
+class TestLockedVertices:
+    @staticmethod
+    def _seamed():
+        """A flat patch whose every position is written twice, one copy per chart.
+
+        The copies are interleaved, so the welded points are numbered
+        differently from the vertices on every row after the first.
+        """
+        positions, indices = shapes.grid(9)
+        doubled = np.repeat(positions, 2, axis=0)
+        uv = ((positions[:, [0, 2]] + 1.0) * 0.5).astype('f4')
+        charts = np.repeat(uv, 2, axis=0)
+        charts[1::2] += 10.0
+        faces = 2 * np.asarray(indices, dtype=np.int64).reshape(-1, 3)
+        right = positions[:, 0] > 0.0
+        across = right[faces // 2].all(axis=1)
+        faces[across] += 1
+        return {'POSITION': doubled, 'TEXCOORD_0': charts}, faces.reshape(-1).astype(np.uint32)
+
+    @pytest.mark.parametrize('vertex', [80, 81], ids=['first-copy', 'second-copy'])
+    def test_a_locked_vertex_is_the_callers_vertex(self, vertex):
+        attributes, indices = self._seamed()
+        held = attributes['POSITION'][vertex].astype('d')
+        result = simplify(attributes, indices, SimplifyOptions(target_count=4, locked=[vertex]))
+        out = result.attributes['POSITION'].astype('d')
+        assert np.min(np.linalg.norm(out - held, axis=1)) < 1e-9
 
     @pytest.mark.parametrize('bad', [np.nan, np.inf, -np.inf], ids=['nan', 'inf', '-inf'])
     def test_a_position_that_is_not_finite_is_refused(self, bad):

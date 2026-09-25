@@ -139,7 +139,7 @@ At least one, and the reduction stops at whichever is reached first.
 | `normal_noise` | `0.001` | probabilistic: how far normals are trusted. The term that conditions the solve, so this is the one that changes the reduction |
 | `boundary_weight` | `1.0` | how hard an open surface's edge is held |
 | `lock_boundary` | `False` | hold the border exactly |
-| `locked` | `None` | further points to hold, indexed into the **welded points** — the caller's own vertex indices unless vertices were welded |
+| `locked` | `None` | further vertices to hold, as indices into the arrays handed in. Every vertex at the same position is held with it |
 | `max_normal_flip` | `90.0` | degrees a face's normal may turn |
 | `min_triangle_quality` | `0.0` | shape floor, 0 (any) to 1 (equilateral only) |
 | `placement` | `'optimal'` | `'endpoint'` keeps every point exactly where it was |

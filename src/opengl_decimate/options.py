@@ -93,8 +93,9 @@ class SimplifyOptions:
         degrees of the original for a third fewer extra vertices than forty
         does. Zero makes every edge hard, which is flat shading; 180 makes none.
         Read only when ``recompute_normals`` is on.
-    :param locked: further points to hold, by index into the welded points --
-        which are the caller's own vertex indices unless vertices were welded.
+    :param locked: further vertices to hold, by index into the arrays handed
+        in. Welding joins every vertex at one position into one point, so
+        holding a vertex holds the others at its position too.
     :param max_normal_flip: degrees a face's normal may turn. Past this it has
         been folded over rather than moved.
     :param min_triangle_quality: the shape floor, from 0 (any shape) to 1
@@ -225,7 +226,7 @@ class SimplifyOptions:
         if self.locked is not None:
             held = np.asarray(self.locked)
             if held.size and (held.ndim != 1 or not np.issubdtype(held.dtype, np.integer)):
-                raise DecimateError('locked must be a flat sequence of point indices')
+                raise DecimateError('locked must be a flat sequence of vertex indices')
             if held.size and int(held.min()) < 0:
                 # NumPy would wrap a negative index round to the far end and
                 # lock a point the caller never named.

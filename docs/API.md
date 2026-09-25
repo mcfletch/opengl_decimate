@@ -83,7 +83,7 @@ zero.
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `lock_boundary` | `bool` | `False` | hold the border exactly |
-| `locked` | `Sequence[int] \| None` | `None` | further points to hold, indexed into the welded points — which are the caller's own vertex indices unless vertices were welded |
+| `locked` | `Sequence[int] \| None` | `None` | further vertices to hold, as indices into the arrays handed in; the point each one welds to is held, so every vertex at that position is held with it |
 | `max_normal_flip` | `float` | `90.0` | degrees a face's normal may turn before the contraction is refused |
 | `min_triangle_quality` | `float` | `0.0` | shape floor: 0 admits any shape, 1 only equilateral |
 | `crease_angle` | `float` | `60.0` | where `recompute_normals` keeps an edge hard, in degrees. Corners further apart than this are not accumulated into one normal. Where the input carries normals they answer alone — they say which edges a model is *smooth* across as well; a mesh with none is asked about its own folds. Zero is flat shading, 180 smooths everything. Read only when `recompute_normals` is on |
@@ -180,7 +180,8 @@ A mesh with no triangles is infinitely far from everywhere.
 ### `build(positions, indices, tolerance=0.0, drop_below=0.0, carried=None) -> Topology`
 
 The welded surface. `Topology.classify(lock_boundary=False, locked=None)` returns
-a `VertexClass` per point: `MANIFOLD`, `BORDER` or `LOCKED`.
+a `VertexClass` per point: `MANIFOLD`, `BORDER` or `LOCKED`. Its `locked` names
+welded points; `Topology.vertex_point` maps each input vertex to its point.
 
 `drop_below` removes whole connected components smaller than that share of the
 model's bounding-box diagonal; the largest is never dropped. `carried` is what
@@ -236,10 +237,7 @@ What that covers:
   `min_triangle_quality` outside `[0, 1]`, an unknown `metric`, `schedule` or
   `placement`, fewer than one candidate, fewer than one certify sample, or a
   negative `locked` index.
-- A `locked` index past the last welded point — raised when the mesh is
-  classified, since that is where the point count is known. The count in the
-  message is of *welded points*, which is fewer than the caller's vertices
-  wherever vertices were welded.
+- A `locked` index past the last vertex handed in.
 
 ## `opengl_decimate.corners`
 
