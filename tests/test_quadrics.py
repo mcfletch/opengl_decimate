@@ -160,6 +160,23 @@ class TestProbabilistic:
         assert ok[0]
         assert point[0] == pytest.approx([0.0, 1.0, 0.0])
 
+    def test_the_default_noise_solves_a_flat_fan(self):
+        """What the probabilistic metric is for: a flat neighbourhood has a minimum.
+
+        Six coplanar triangles around a point, at the noise the options default
+        to. The minimum is within the fan, at its own plane.
+        """
+        from opengl_decimate.options import DEFAULT_NORMAL_NOISE
+
+        angles = np.linspace(0.0, 2.0 * np.pi, 7)[:-1]
+        rim = np.stack([np.cos(angles), np.zeros(6), np.sin(angles)], axis=1)
+        q = quadrics.plane_quadric(
+            np.tile([0.0, 1.0, 0.0], (6, 1)), rim, normal_noise=DEFAULT_NORMAL_NOISE
+        ).sum(axis=0, keepdims=True)
+        point, ok = quadrics.minimize(q)
+        assert ok[0]
+        assert point[0] == pytest.approx([0.0, 0.0, 0.0], abs=1e-9)
+
     def test_cost_stays_non_negative(self):
         """It is an expected squared error, so it cannot be below zero."""
         rng = np.random.default_rng(7)

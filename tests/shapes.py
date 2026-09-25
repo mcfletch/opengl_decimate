@@ -176,6 +176,31 @@ def fan(valence: int = 16):
     return _mesh(positions, faces)
 
 
+def tube(around: int = 48, along: int = 40, noise: float = 0.0, seed: int = 0):
+    """An open cylinder of radius one along Y, from -2 to 2.
+
+    Every plane on a cylinder contains its axis, so the summed quadric of an
+    edge is singular along it. ``noise`` jitters the points by that standard
+    deviation, which leaves the solve determined but nearly singular -- the
+    shape a scanned pipe or trunk presents.
+    """
+    angle = np.linspace(0.0, 2.0 * np.pi, around, endpoint=False)
+    height = np.linspace(-2.0, 2.0, along)
+    a, h = np.meshgrid(angle, height, indexing='ij')
+    positions = np.stack([np.cos(a), h, np.sin(a)], axis=-1).reshape(-1, 3)
+    positions += np.random.default_rng(seed).normal(scale=noise, size=positions.shape)
+    i, j = np.meshgrid(np.arange(around), np.arange(along - 1), indexing='ij')
+    here = (i * along + j).reshape(-1)
+    beside = (((i + 1) % around) * along + j).reshape(-1)
+    faces = np.concatenate(
+        [
+            np.stack([here, here + 1, beside], axis=1),
+            np.stack([beside, here + 1, beside + 1], axis=1),
+        ]
+    )
+    return _mesh(positions, faces)
+
+
 def nearly_coincident(count: int = 200, spread: float = 1e-7):
     """A grid whose points are each duplicated a hair away, as a scan's are.
 

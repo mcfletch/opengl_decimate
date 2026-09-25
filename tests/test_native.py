@@ -41,6 +41,7 @@ class TestTheTwoPathsAgree:
             pytest.param(shapes.grid(20, bump=0.4), id='patch'),
             pytest.param(shapes.grid(12), id='flat-patch'),
             pytest.param(shapes.octahedron(), id='octahedron'),
+            pytest.param(shapes.tube(noise=1e-5), id='noisy-tube'),
         ],
     )
     def test_they_reduce_to_the_same_mesh(self, mesh):
@@ -66,6 +67,18 @@ class TestTheTwoPathsAgree:
             SimplifyOptions(target_ratio=0.3, lock_boundary=True),
         )
         assert compiled.triangle_count == pure.triangle_count
+        assert compiled.attributes['POSITION'] == pytest.approx(
+            pure.attributes['POSITION'], abs=1e-9
+        )
+
+    def test_they_agree_on_the_probabilistic_metric(self):
+        positions, indices = shapes.grid(16)
+        compiled, pure = _both(
+            {'POSITION': positions},
+            indices,
+            SimplifyOptions(target_ratio=0.3, metric='probabilistic'),
+        )
+        assert np.array_equal(compiled.indices, pure.indices)
         assert compiled.attributes['POSITION'] == pytest.approx(
             pure.attributes['POSITION'], abs=1e-9
         )

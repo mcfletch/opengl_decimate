@@ -269,7 +269,7 @@ class _Engine:
         places = np.stack([here, there, middle, best], axis=1)
         allowed = np.ones((len(pairs), 4), dtype=bool)
         allowed[:, 2] = self.options.placement == 'optimal'
-        allowed[:, 3] = solvable
+        allowed[:, 3] = solvable & _near_the_edge(best, middle, here, there)
         held_here = self.kinds[left] == VertexClass.LOCKED
         held_there = self.kinds[right] == VertexClass.LOCKED
         allowed[held_here] = (True, False, False, False)
@@ -461,6 +461,24 @@ class _Engine:
             input_faces=self.mesh.input_faces,
             dropped_faces=self.mesh.dropped_faces,
         )
+
+
+def _near_the_edge(
+    points: FloatArray, middle: FloatArray, here: FloatArray, there: FloatArray
+) -> np.ndarray:
+    """Whether each point is no further from its edge's midpoint than the edge is long.
+
+    A minimum further than that comes from a nearly singular solve, and sits
+    wherever rounding put it along the direction the quadric cannot see. It is
+    written out coordinate by coordinate, as the compiled reducer computes it,
+    so the two reducers draw the line in the same place.
+    """
+    away = points - middle
+    edge = there - here
+    return (
+        away[:, 0] * away[:, 0] + away[:, 1] * away[:, 1] + away[:, 2] * away[:, 2]
+        <= edge[:, 0] * edge[:, 0] + edge[:, 1] * edge[:, 1] + edge[:, 2] * edge[:, 2]
+    )
 
 
 def _locked_points(mesh: Topology, locked: Sequence[int] | None) -> IndexArray | None:

@@ -210,8 +210,18 @@ def minimize(quadrics: FloatArray, tolerance: float = 1e-10) -> tuple[FloatArray
     must replace with a fallback of its own. Being told is the useful part: a
     flat neighbourhood is the common case, not an error.
 
-    ``tolerance`` is compared against the determinant scaled by the matrix's own
-    magnitude, so it means the same thing for a quadric of any size.
+    ``tolerance`` is the smallest reciprocal condition number accepted. The
+    matrix's largest entry times its largest cofactor, over the determinant, is
+    the condition number in the largest-entry norm, so the test means the same
+    thing for a quadric of any size. It separates a plane of equally good
+    points, whose condition is infinite, from a noisy plane, whose condition is
+    about one over the squared normal noise: the probabilistic metric's default
+    of 1e-3 conditions the solve to 1e6, which it accepts.
+
+    A determined minimum can still be far from any edge it is asked about,
+    where the matrix is nearly singular: the point then slides along the
+    valley to wherever rounding put it. Bounding that is the caller's job,
+    because only the caller knows which edge it was.
     """
     quadrics = np.asarray(quadrics, dtype='d')
     a00, a01, a02 = quadrics[:, 0], quadrics[:, 1], quadrics[:, 2]
@@ -231,7 +241,8 @@ def minimize(quadrics: FloatArray, tolerance: float = 1e-10) -> tuple[FloatArray
     determinant = a00 * c00 + a01 * c01 + a02 * c02
 
     magnitude = np.max(np.abs(np.stack([a00, a01, a02, a11, a12, a22], axis=1)), axis=1)
-    determined = np.abs(determinant) > tolerance * magnitude**3
+    cofactor = np.max(np.abs(np.stack([c00, c01, c02, c11, c12, c22], axis=1)), axis=1)
+    determined = np.abs(determinant) > tolerance * magnitude * cofactor
 
     points = np.zeros((len(quadrics), 3), dtype='d')
     safe = np.where(determined, determinant, 1.0)

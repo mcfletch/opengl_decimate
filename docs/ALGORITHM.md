@@ -112,8 +112,15 @@ in `tests/test_quadrics.py`.
 For a candidate pair, the summed quadric is minimised. Four placements are
 considered — each endpoint, the midpoint, and the minimiser — and the cheapest
 admissible one wins. The minimiser is dropped where the 3x3 system is singular,
-which is the ordinary case on a flat neighbourhood rather than an error; a locked
-endpoint admits only its own position, and two locked endpoints admit nothing.
+which is the ordinary case on a flat neighbourhood under the classical metric
+rather than an error. Singular means a condition number above 1e10, measured as
+the largest entry times the largest cofactor over the determinant; the
+probabilistic metric's normal noise conditions a flat neighbourhood to about one
+over its square. The minimiser is also dropped where it lies further from the
+edge's midpoint than the edge is long: a nearly singular system, such as a
+noisy cylinder along its axis, puts it wherever rounding left it along the
+direction the planes cannot see. A locked endpoint admits only its own position,
+and two locked endpoints admit nothing.
 
 All of this is one pass over arrays: the batch solve is a vectorised adjugate,
 and the four costs are one evaluation over a reshaped stack.

@@ -357,6 +357,22 @@ class TestPlacement:
         for row in result.attributes['POSITION'].tolist():
             assert tuple(row) in original
 
+    def test_a_nearly_singular_solve_does_not_place_a_point_far_from_its_edge(self):
+        """On a noisy cylinder the minimum along the axis is wherever rounding put it.
+
+        The solve is determined, and the point it finds can be hundreds of
+        edge lengths away. Such a point is not a placement: the edge is priced
+        at its ends and its midpoint instead.
+        """
+        positions, indices = shapes.tube(noise=1e-5)
+        mesh = topology.build(positions, indices)
+        edges = mesh.edges()
+        engine = reduction._Engine(mesh, SimplifyOptions(target_ratio=0.5))
+        _, placement = engine.candidates(edges)
+        here, there = mesh.positions[edges[:, 0]], mesh.positions[edges[:, 1]]
+        away = np.linalg.norm(placement - 0.5 * (here + there), axis=1)
+        assert np.all(away <= np.linalg.norm(there - here, axis=1))
+
     def test_optimal_placement_is_the_more_accurate_of_the_two(self):
         positions, indices = shapes.icosphere(3)
         optimal = simplify({'POSITION': positions}, indices, SimplifyOptions(target_ratio=0.2))

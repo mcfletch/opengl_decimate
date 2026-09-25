@@ -656,6 +656,8 @@ cdef class Reducer:
             else:
                 if not solved or self.placement_mode != 0 or locked_a or locked_b:
                     continue
+                if not self._near_the_edge(a, b, optimum):
+                    continue
                 candidate[0] = optimum[0]
                 candidate[1] = optimum[1]
                 candidate[2] = optimum[2]
@@ -674,6 +676,19 @@ cdef class Reducer:
         if weight < TINY:
             weight = TINY
         return sqrt(best / weight)
+
+    cdef bint _near_the_edge(self, int a, int b, double* point) noexcept nogil:
+        """No further from the midpoint than the edge is long, as ``reduction._near_the_edge``."""
+        cdef double away[3]
+        cdef double edge[3]
+        cdef int axis
+        for axis in range(3):
+            away[axis] = point[axis] - 0.5 * (self.positions[a, axis] + self.positions[b, axis])
+            edge[axis] = self.positions[b, axis] - self.positions[a, axis]
+        return (
+            away[0] * away[0] + away[1] * away[1] + away[2] * away[2]
+            <= edge[0] * edge[0] + edge[1] * edge[1] + edge[2] * edge[2]
+        )
 
     cdef int _grow_log(self) noexcept nogil:
         """Double the log. 0 on success, -1 where there is no memory.
@@ -974,8 +989,26 @@ cdef inline double _evaluate(double* q, double* p) noexcept nogil:
     )
 
 
+cdef inline double _largest(
+    double a, double b, double c, double d, double e, double f
+) noexcept nogil:
+    """The largest magnitude of six values."""
+    cdef double most = fabs(a)
+    if fabs(b) > most: most = fabs(b)
+    if fabs(c) > most: most = fabs(c)
+    if fabs(d) > most: most = fabs(d)
+    if fabs(e) > most: most = fabs(e)
+    if fabs(f) > most: most = fabs(f)
+    return most
+
+
 cdef inline bint _minimise(double* q, double* out) noexcept nogil:
-    """Solve for the quadric's minimum; False where it has no single one."""
+    """Solve for the quadric's minimum; False where it has no single one.
+
+    The same test as :func:`opengl_decimate.quadrics.minimize`: the reciprocal
+    condition number, largest entry times largest cofactor over the
+    determinant, has to exceed 1e-10.
+    """
     cdef double a00 = q[0], a01 = q[1], a02 = q[2]
     cdef double a11 = q[4], a12 = q[5], a22 = q[7]
     cdef double b0 = -q[3], b1 = -q[6], b2 = -q[8]
@@ -986,13 +1019,9 @@ cdef inline bint _minimise(double* q, double* out) noexcept nogil:
     cdef double c12 = a01 * a02 - a00 * a12
     cdef double c22 = a00 * a11 - a01 * a01
     cdef double determinant = a00 * c00 + a01 * c01 + a02 * c02
-    cdef double magnitude = fabs(a00)
-    if fabs(a01) > magnitude: magnitude = fabs(a01)
-    if fabs(a02) > magnitude: magnitude = fabs(a02)
-    if fabs(a11) > magnitude: magnitude = fabs(a11)
-    if fabs(a12) > magnitude: magnitude = fabs(a12)
-    if fabs(a22) > magnitude: magnitude = fabs(a22)
-    if fabs(determinant) <= 1e-10 * magnitude * magnitude * magnitude:
+    cdef double magnitude = _largest(a00, a01, a02, a11, a12, a22)
+    cdef double cofactor = _largest(c00, c01, c02, c11, c12, c22)
+    if fabs(determinant) <= 1e-10 * magnitude * cofactor:
         return False
     out[0] = (c00 * b0 + c01 * b1 + c02 * b2) / determinant
     out[1] = (c01 * b0 + c11 * b1 + c12 * b2) / determinant
