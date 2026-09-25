@@ -22,7 +22,7 @@ import numpy as np
 from opengl_decimate.topology import Topology, VertexClass
 from opengl_decimate.types import DecimateError, FloatArray, IndexArray
 
-__all__ = ['ACCELERATED', 'check_index_width', 'reduce_mesh']
+__all__ = ['ACCELERATED', 'check_index_width', 'ends_given_up', 'reduce_mesh']
 
 
 def _load() -> Any:
@@ -112,6 +112,25 @@ def reduce_mesh(
     # earlier describe a surface that is no longer there.
     mesh.forget_adjacency()
     return dying, surviving, placements, deviation, removed_at
+
+
+def ends_given_up(
+    points: FloatArray,
+    placement: FloatArray,
+    dying: IndexArray,
+    surviving: IndexArray,
+    charts: IndexArray,
+    point_count: int,
+) -> tuple[IndexArray, IndexArray]:
+    """:func:`opengl_decimate.corners.ends_given_up_in_python`, in C."""
+    return _NATIVE.ends_given_up(
+        np.ascontiguousarray(points, dtype='d').reshape(-1, 3),
+        np.ascontiguousarray(placement, dtype='d').reshape(-1, 3),
+        np.ascontiguousarray(dying, dtype=np.int64),
+        np.ascontiguousarray(surviving, dtype=np.int64),
+        np.ascontiguousarray(charts, dtype=np.int64),
+        int(point_count),
+    )
 
 
 def vertex_class_values() -> tuple[int, int, int]:

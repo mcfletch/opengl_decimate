@@ -16,7 +16,14 @@ import numpy as np
 import pytest
 import shapes
 
-from opengl_decimate import SimplifyOptions, collapse_sequence, native, simplify, topology
+from opengl_decimate import (
+    SimplifyOptions,
+    collapse_sequence,
+    corners,
+    native,
+    simplify,
+    topology,
+)
 from opengl_decimate.types import DecimateError
 
 pytestmark = pytest.mark.skipif(not native.ACCELERATED, reason='accelerator not built')
@@ -244,6 +251,37 @@ class TestTheCompiledPathKeepsTheInvariants:
         for index in np.flatnonzero(mesh.alive):
             for point in mesh.faces[index]:
                 assert index in mesh.vertex_faces[point]
+
+
+class TestTheCornerHandover:
+    """Which end of each contraction keeps its corners, decided in either language."""
+
+    @pytest.mark.parametrize(
+        'mesh',
+        [
+            pytest.param(shapes.three_charts(), id='three-charts'),
+            pytest.param(shapes.cube_with_hard_normals(), id='hard-cube'),
+        ],
+    )
+    def test_they_hand_the_same_corners_over(self, mesh):
+        attributes, indices = mesh
+        sequence = collapse_sequence(attributes, indices)
+        drawn = corners.copies_per_point(
+            sequence.vertex_point, sequence.corners, attributes, len(sequence.points)
+        )
+        arguments = (
+            sequence.points,
+            sequence.placement,
+            sequence.dying,
+            sequence.surviving,
+            drawn,
+            len(sequence.points),
+        )
+        compiled = native.ends_given_up(*arguments)
+        pure = corners.ends_given_up_in_python(*arguments)
+        assert len(sequence) > 0
+        assert np.array_equal(compiled[0], pure[0])
+        assert np.array_equal(compiled[1], pure[1])
 
 
 class TestTheCostOfAHighValence:

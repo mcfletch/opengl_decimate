@@ -203,6 +203,23 @@ def _ends_given_up(
     charts: IndexArray,
     point_count: int,
 ) -> tuple[IndexArray, IndexArray]:
+    """:func:`ends_given_up_in_python`, through the compiled reducer where it built."""
+    # Imported here: `native` imports `topology`, which imports this module.
+    from opengl_decimate import native
+
+    if native.ACCELERATED:
+        return native.ends_given_up(points, placement, dying, surviving, charts, point_count)
+    return ends_given_up_in_python(points, placement, dying, surviving, charts, point_count)
+
+
+def ends_given_up_in_python(
+    points: FloatArray,
+    placement: FloatArray,
+    dying: IndexArray,
+    surviving: IndexArray,
+    charts: IndexArray,
+    point_count: int,
+) -> tuple[IndexArray, IndexArray]:
     """For each contraction, which end's copies are let go and which are kept.
 
     A point's copies are the copies of whichever end has won every merge it has
@@ -218,8 +235,8 @@ def _ends_given_up(
 
     The loop is the reduction's own order: a contraction's answer depends on what
     the contractions before it decided, which is the same reason the reduction
-    itself is sequential. It costs a few array lookups per contraction, against
-    the neighbourhood the reduction re-priced to produce one.
+    itself is sequential. ``_reduce_native.ends_given_up`` is the same loop in
+    C, and the two are held to the same answers.
     """
     sourced = list(range(point_count))
     drawn = charts.tolist()

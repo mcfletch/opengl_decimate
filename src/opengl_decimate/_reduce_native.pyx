@@ -971,6 +971,59 @@ cdef class Reducer:
         return dying, surviving, place, deviation, removed
 
 
+def ends_given_up(
+    double[:, ::1] points,
+    double[:, ::1] placement,
+    cnp.int64_t[::1] dying,
+    cnp.int64_t[::1] surviving,
+    cnp.int64_t[::1] drawn,
+    Py_ssize_t point_count,
+):
+    """For each contraction, which end's copies are let go and which are kept.
+
+    The loop of :func:`opengl_decimate.corners.ends_given_up_in_python`, with
+    the same arithmetic in the same order: the end drawn at more texture
+    coordinates wins, and between equals the one whose copies were measured
+    nearer the placement, the surviving end on a tie.
+    """
+    cdef Py_ssize_t steps = dying.shape[0], step, i
+    loser_array = np.empty(steps, dtype=np.int64)
+    winner_array = np.empty(steps, dtype=np.int64)
+    sourced_array = np.arange(point_count, dtype=np.int64)
+    cdef cnp.int64_t[::1] loser = loser_array
+    cdef cnp.int64_t[::1] winner = winner_array
+    cdef cnp.int64_t[::1] sourced = sourced_array
+    cdef cnp.int64_t from_dying, from_surviving, keep, give_up, richer
+    cdef double x, y, z, near, far
+    cdef bint nearer
+    with nogil:
+        for step in range(steps):
+            from_dying = sourced[dying[step]]
+            from_surviving = sourced[surviving[step]]
+            richer = drawn[from_dying] - drawn[from_surviving]
+            if richer:
+                nearer = richer > 0
+            else:
+                x = placement[step, 0]
+                y = placement[step, 1]
+                z = placement[step, 2]
+                near = ((x - points[from_dying, 0]) * (x - points[from_dying, 0])
+                        + (y - points[from_dying, 1]) * (y - points[from_dying, 1])
+                        + (z - points[from_dying, 2]) * (z - points[from_dying, 2]))
+                far = ((x - points[from_surviving, 0]) * (x - points[from_surviving, 0])
+                       + (y - points[from_surviving, 1]) * (y - points[from_surviving, 1])
+                       + (z - points[from_surviving, 2]) * (z - points[from_surviving, 2]))
+                nearer = near < far
+            if nearer:
+                keep, give_up = from_dying, from_surviving
+            else:
+                keep, give_up = from_surviving, from_dying
+            sourced[surviving[step]] = keep
+            winner[step] = keep
+            loser[step] = give_up
+    return loser_array, winner_array
+
+
 cdef int _int_order(const void* left, const void* right) noexcept nogil:
     cdef int a = (<const int*> left)[0], b = (<const int*> right)[0]
     return (a > b) - (a < b)
