@@ -43,7 +43,8 @@ import numpy as np
 
 from opengl_decimate import topology
 from opengl_decimate.corners import copies_per_point
-from opengl_decimate.types import POSITION, AttributeMap, IndexArray
+from opengl_decimate.options import SimplifyOptions
+from opengl_decimate.types import AttributeMap, IndexArray
 
 __all__ = ['Survey', 'survey']
 
@@ -79,6 +80,14 @@ class Survey:
     #: Triangles in the middle chart, and in the smaller quarter of them.
     median_chart: int = 0
     small_chart: int = 0
+    #: Triangles ``drop_components_below`` removed, where the options asked for
+    #: it. They are in ``triangles`` and in none of the counts after it.
+    dropped_away: int = 0
+
+    @property
+    def surveyed(self) -> int:
+        """The triangles the survey describes: what welding and dropping left."""
+        return self.triangles - self.welded_away - self.dropped_away
 
     @property
     def floor(self) -> int:
@@ -115,7 +124,7 @@ class Survey:
         """
         if not self.small_chart:
             return 0
-        return (self.triangles - self.welded_away) // self.small_chart
+        return self.surveyed // self.small_chart
 
     @property
     def reducible(self) -> float:
@@ -125,28 +134,38 @@ class Survey:
         it before choosing a target: a canopy of leaf cards comes back near
         zero, and no target will improve on that.
         """
-        live = self.triangles - self.welded_away
+        live = self.surveyed
         return max(0.0, (live - self.floor) / live) if live else 0.0
 
 
-def survey(attributes: AttributeMap, indices: IndexArray) -> Survey:
+def survey(
+    attributes: AttributeMap, indices: IndexArray, options: SimplifyOptions | None = None
+) -> Survey:
     """Measure what would stop a reduction of this mesh, without running one.
 
     ``attributes`` and ``indices`` are the same arrays
-    :func:`~opengl_decimate.simplify` takes. Texture coordinates are read where
-    they are there, to find the atlas seams; nothing else is.
+    :func:`~opengl_decimate.simplify` takes, checked the same way. Texture
+    coordinates are read where they are there, to find the atlas seams; nothing
+    else is. ``options`` are the ones the reduction will be given: their
+    ``weld_tolerance`` and ``drop_components_below`` decide which mesh is
+    reduced, so the survey measures that mesh. Nothing else in them is read.
 
     The cost is the weld and one pass for the adjacency -- a fraction of a
     reduction, and the same fraction whatever target was in mind.
     """
-    positions = np.asarray(attributes[POSITION])
-    mesh = topology.build(positions, indices)
+    mesh = topology.build(
+        topology.positions_of(attributes),
+        indices,
+        0.0 if options is None else options.weld_tolerance,
+        0.0 if options is None else options.drop_components_below,
+    )
     faces = mesh.faces
+    welded_away = mesh.input_faces - len(faces) - mesh.dropped_faces
     if not len(faces):
         return Survey(
-            triangles=len(np.asarray(indices).reshape(-1)) // 3,
+            triangles=mesh.input_faces,
             points=len(mesh.positions),
-            welded_away=len(np.asarray(indices).reshape(-1)) // 3,
+            welded_away=welded_away,
             pieces=0,
             open_pieces=0,
             largest_piece=0,
@@ -197,7 +216,7 @@ def survey(attributes: AttributeMap, indices: IndexArray) -> Survey:
     return Survey(
         triangles=mesh.input_faces,
         points=len(mesh.positions),
-        welded_away=mesh.input_faces - len(faces),
+        welded_away=welded_away,
         pieces=len(names),
         open_pieces=int(np.count_nonzero(bordered)),
         largest_piece=int(sizes.max()),
@@ -206,4 +225,5 @@ def survey(attributes: AttributeMap, indices: IndexArray) -> Survey:
         charts=charts,
         median_chart=median_chart,
         small_chart=small_chart,
+        dropped_away=mesh.dropped_faces,
     )

@@ -17,6 +17,7 @@ import pytest
 import shapes
 
 from opengl_decimate import SimplifyOptions, collapse_sequence, native, simplify, topology
+from opengl_decimate.types import DecimateError
 
 pytestmark = pytest.mark.skipif(not native.ACCELERATED, reason='accelerator not built')
 
@@ -288,6 +289,24 @@ class TestItSharesTheInterpreter:
         gaps = np.diff(np.asarray(ticks))
         assert len(gaps), 'the reduction finished before the watcher ticked twice'
         assert float(gaps.max()) < 0.5 * elapsed
+
+
+class TestTheIndexWidth:
+    """The compiled loop holds point and incidence indices in 32 bits."""
+
+    def test_a_mesh_that_fits_is_accepted(self):
+        native.check_index_width(points=2**31 - 1, faces=(2**31 - 1) // 3)
+
+    @pytest.mark.parametrize(
+        'points, faces',
+        [
+            pytest.param(2**31, 10, id='points'),
+            pytest.param(10, (2**31 - 1) // 3 + 1, id='incidences'),
+        ],
+    )
+    def test_a_mesh_that_does_not_is_refused(self, points, faces):
+        with pytest.raises(DecimateError, match='32-bit'):
+            native.check_index_width(points=points, faces=faces)
 
 
 class TestTheBuildContract:

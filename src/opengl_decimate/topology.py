@@ -33,12 +33,13 @@ import numpy as np
 
 from opengl_decimate.corners import copies_per_point
 from opengl_decimate.spatial import NEIGHBOURHOOD, CellGrid
-from opengl_decimate.types import DecimateError, FloatArray, IndexArray
+from opengl_decimate.types import POSITION, AttributeMap, DecimateError, FloatArray, IndexArray
 
 __all__ = [
     'VertexClass',
     'Topology',
     'build',
+    'positions_of',
     'atlas_charts',
     'components',
     'smoothing_groups',
@@ -660,6 +661,26 @@ def _too_small(points: FloatArray, faces: IndexArray, share: float) -> np.ndarra
     return (reach[per_face] < share * whole) & (per_face != biggest)
 
 
+def positions_of(attributes: AttributeMap) -> FloatArray:
+    """The positions, once the attribute set has been shown to be a mesh.
+
+    ``POSITION`` has to be there, and every attribute has to be one row per
+    vertex, with as many rows as ``POSITION``.
+    """
+    if POSITION not in attributes:
+        raise DecimateError("attributes must include 'POSITION'")
+    positions = np.asarray(attributes[POSITION])
+    for name, value in attributes.items():
+        rows = np.asarray(value)
+        if not rows.ndim:
+            raise DecimateError('%s is a single value, not one row per vertex' % (name,))
+        if len(rows) != len(positions):
+            raise DecimateError(
+                '%s has %d rows, POSITION has %d' % (name, len(rows), len(positions))
+            )
+    return positions
+
+
 def build(
     positions: FloatArray,
     indices: IndexArray,
@@ -703,6 +724,8 @@ def build(
             % (int(np.argmin(finite)), positions[int(np.argmin(finite))].tolist())
         )
     flat = np.asarray(indices).reshape(-1)
+    if len(flat) and flat.dtype.kind not in 'iu':
+        raise DecimateError('indices must be integers, got %s' % (flat.dtype,))
     if len(flat) % 3:
         raise DecimateError('indices must be a multiple of three, got %d' % (len(flat),))
     corners = flat.reshape(-1, 3).astype(np.int64)

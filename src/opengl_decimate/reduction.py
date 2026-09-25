@@ -90,29 +90,12 @@ def collapse_sequence(
     return _reduce(attributes, indices, options or _EXHAUSTIVE, exhaust=True)
 
 
-def _check(attributes: AttributeMap) -> FloatArray:
-    """The positions, once the attribute set has been shown to be a mesh."""
-    if POSITION not in attributes:
-        raise DecimateError("attributes must include 'POSITION'")
-    positions = np.asarray(attributes[POSITION])
-    for name, value in attributes.items():
-        rows = np.asarray(value)
-        if not rows.ndim:
-            raise DecimateError('%s is a single value, not one row per vertex' % (name,))
-        if len(rows) != len(positions):
-            raise DecimateError(
-                '%s has %d rows, POSITION has %d' % (name, len(rows), len(positions))
-            )
-    return positions
-
-
 def _reduce(
     attributes: AttributeMap, indices: IndexArray, options: SimplifyOptions, exhaust: bool
 ) -> CollapseSequence:
     """Build the mesh, run a schedule over it, and return what it did."""
-    positions = _check(attributes)
     mesh = topology.build(
-        positions,
+        topology.positions_of(attributes),
         indices,
         options.weld_tolerance,
         options.drop_components_below,

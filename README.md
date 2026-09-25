@@ -107,7 +107,8 @@ triangle; lace has a handle through every hole, and no contraction closes one;
 and a texture coordinate means something only inside one chart of the atlas, so
 a model unwrapped into thousands of small ones runs out of texture long before
 it runs out of triangles. `survey` measures all of it and puts a floor on what
-any target can reach.
+any target can reach. Given the options the reduction will run with, it surveys
+the mesh their weld and `drop_components_below` leave.
 
 ```python
 from opengl_decimate import survey

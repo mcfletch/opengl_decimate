@@ -20,9 +20,9 @@ from typing import Any
 import numpy as np
 
 from opengl_decimate.topology import Topology, VertexClass
-from opengl_decimate.types import FloatArray, IndexArray
+from opengl_decimate.types import DecimateError, FloatArray, IndexArray
 
-__all__ = ['ACCELERATED', 'reduce_mesh']
+__all__ = ['ACCELERATED', 'check_index_width', 'reduce_mesh']
 
 
 def _load() -> Any:
@@ -44,6 +44,29 @@ _NATIVE = _load()
 ACCELERATED = _NATIVE is not None
 
 
+#: The largest index the compiled loop holds: a C ``int``.
+_INT_MAX = 2**31 - 1
+
+
+def check_index_width(points: int, faces: int) -> None:
+    """Refuse a mesh whose indices do not fit the compiled loop's 32-bit ints.
+
+    A point is named by its index, and a face corner by ``3 * face + slot``, so
+    the limits are about two billion points and about 715 million faces. NumPy
+    would wrap a larger index silently on the way in.
+    """
+    if points > _INT_MAX:
+        raise DecimateError(
+            'the compiled reducer holds point indices in 32-bit ints; %d points is too many'
+            % (points,)
+        )
+    if 3 * faces > _INT_MAX:
+        raise DecimateError(
+            'the compiled reducer holds face corners in 32-bit ints; %d faces is too many'
+            % (faces,)
+        )
+
+
 def reduce_mesh(
     mesh: Topology,
     quadrics: FloatArray,
@@ -62,6 +85,7 @@ def reduce_mesh(
     at. The mesh's faces, positions and live count are left as the reduction
     finished them.
     """
+    check_index_width(mesh.vertex_count, len(mesh.faces))
     faces = np.ascontiguousarray(mesh.faces, dtype=np.int32)
     alive = np.ascontiguousarray(mesh.alive).view(np.uint8)
     reducer = _NATIVE.Reducer(

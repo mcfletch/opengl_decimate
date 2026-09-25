@@ -618,6 +618,16 @@ class TestLockedVertices:
         with pytest.raises(DecimateError, match='row 2'):
             simplify({'POSITION': broken}, indices, SimplifyOptions(target_ratio=0.5))
 
+    def test_indices_that_are_not_integers_are_refused(self):
+        """A float index is truncated by the cast, naming a vertex nobody asked for."""
+        positions, indices = shapes.octahedron()
+        with pytest.raises(DecimateError, match='integer'):
+            simplify(
+                {'POSITION': positions},
+                indices.astype('f8') + 0.7,
+                SimplifyOptions(target_ratio=0.5),
+            )
+
     def test_an_attribute_that_is_not_an_array_is_refused(self):
         positions, indices = shapes.octahedron()
         with pytest.raises(DecimateError, match='WEIGHT'):

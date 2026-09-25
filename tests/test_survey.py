@@ -13,6 +13,7 @@ import pytest
 import shapes
 
 from opengl_decimate import SimplifyOptions, native, simplify, survey
+from opengl_decimate.types import DecimateError
 
 
 def _cards(count=50, seed=0):
@@ -124,6 +125,34 @@ class TestWhatStopsAReduction:
         assert report.welded_away == 1
         assert report.pieces == 1
         assert report.points == 6
+
+
+class TestWhatItIsGiven:
+    def test_a_mesh_without_positions_is_refused(self):
+        positions, indices = shapes.octahedron()
+        with pytest.raises(DecimateError, match='POSITION'):
+            survey({'X': positions}, indices)
+
+    def test_an_attribute_of_the_wrong_length_is_refused(self):
+        positions, indices = shapes.octahedron()
+        with pytest.raises(DecimateError, match='TEXCOORD_0'):
+            survey({'POSITION': positions, 'TEXCOORD_0': np.zeros((2, 2))}, indices)
+
+    def test_it_surveys_the_mesh_the_options_would_reduce(self):
+        """A scan is welded and cleaned before it is reduced, and surveyed the same way."""
+        attributes, indices = _cards(6)
+        crumb = np.array([(0.0, 0.0, 0.0), (0.01, 0.0, 0.0), (0.0, 0.01, 0.0)], dtype='f4')
+        positions = np.concatenate([attributes['POSITION'], crumb + 50.0])
+        crumb_faces = np.arange(3, dtype=np.uint32) + len(attributes['POSITION'])
+        faces = np.concatenate([indices, crumb_faces])
+        options = SimplifyOptions(target_ratio=0.5, drop_components_below=0.01)
+        plain = survey({'POSITION': positions}, faces)
+        cleaned = survey({'POSITION': positions}, faces, options)
+        assert plain.pieces == 7
+        assert cleaned.pieces == 6
+        assert cleaned.dropped_away == 1
+        assert cleaned.welded_away == 0
+        assert simplify({'POSITION': positions}, faces, options).dropped_away == 1
 
 
 class TestTheFloorIsWhereAReductionStops:

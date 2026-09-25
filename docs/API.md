@@ -26,17 +26,23 @@ so `options` may be left out entirely where the defaults will do. They are what
 `CollapseSequence.at` is asked for afterwards. This is the call to make once when
 a model is loaded.
 
-## `survey(attributes, indices) -> Survey`
+## `survey(attributes, indices, options=None) -> Survey`
 
 Measure what would stop a reduction of this mesh, without running one. Takes the
-same arrays as `simplify`. Texture coordinates are read where they are there, to
-find the seams and the charts of the atlas; nothing else the mesh carries is.
+same arrays as `simplify` and refuses what it refuses. Texture coordinates are
+read where they are there, to find the seams and the charts of the atlas;
+nothing else the mesh carries is. `options`, where given, are the
+`SimplifyOptions` the reduction will run with: their `weld_tolerance` and
+`drop_components_below` decide the mesh that is reduced, so they decide the mesh
+that is surveyed. Nothing else in them is read.
 
 | Field | Type | Meaning |
 |---|---|---|
 | `triangles` | `int` | triangles handed in |
 | `points` | `int` | distinct positions they cover, once welded |
 | `welded_away` | `int` | triangles welding dropped for leaving with a repeated corner |
+| `dropped_away` | `int` | triangles `drop_components_below` removed; 0 without options |
+| `surveyed` | `int` | the triangles every count below describes: `triangles` less both of those |
 | `pieces` | `int` | connected pieces of surface |
 | `open_pieces` | `int` | how many of those have a border |
 | `largest_piece` | `int` | triangles in the largest, which is the subject where the rest are specks |
@@ -234,8 +240,8 @@ What that covers:
 
 - `POSITION` missing, not `(n, 3)`, or carrying a value that is not finite; an
   attribute with a different number of rows, or that is not one row per vertex;
-  an index array whose length is not a multiple of three, or that names a vertex
-  the mesh does not have.
+  an index array that is not of an integer type, whose length is not a multiple
+  of three, or that names a vertex the mesh does not have.
 - Every field of `SimplifyOptions` outside its documented range — no target at
   all, a ratio outside `(0, 1]`, a negative count, error, noise, tolerance or
   boundary weight, a `max_normal_flip` outside `[0, 180]`, a
@@ -243,6 +249,8 @@ What that covers:
   `placement`, fewer than one candidate, fewer than one certify sample, or a
   negative `locked` index.
 - A `locked` index past the last vertex handed in.
+- A mesh too large for the compiled reducer's 32-bit indices: more than
+  2,147,483,647 welded points, or more than 715,827,882 triangles.
 
 ## `opengl_decimate.corners`
 
