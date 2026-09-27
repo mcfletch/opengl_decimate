@@ -394,3 +394,11 @@ class TestTheBuildContract:
         points, which is the kind of defect that reaches a release.
         """
         assert native.vertex_class_values() == (0, 1, 2)
+
+
+@pytest.mark.parametrize('call, arguments', [('reduce_mesh', 9), ('ends_given_up', 6)])
+def test_a_compiled_entry_point_without_the_accelerator_says_so(monkeypatch, call, arguments):
+    """Asked for directly where the extension was not built, it names what is missing."""
+    monkeypatch.setattr(native, '_NATIVE', None)
+    with pytest.raises(DecimateError, match='not built'):
+        getattr(native, call)(*([None] * arguments))

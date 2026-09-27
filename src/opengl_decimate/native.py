@@ -67,6 +67,16 @@ def check_index_width(points: int, faces: int) -> None:
         )
 
 
+def _compiled() -> Any:
+    """The compiled extension; :class:`DecimateError` where it was not built."""
+    if _NATIVE is None:
+        raise DecimateError(
+            'the compiled reducer is not built; the NumPy reducer is used without it '
+            '(opengl_decimate.native.ACCELERATED is False)'
+        )
+    return _NATIVE
+
+
 def reduce_mesh(
     mesh: Topology,
     quadrics: FloatArray,
@@ -85,10 +95,11 @@ def reduce_mesh(
     at. The mesh's faces, positions and live count are left as the reduction
     finished them.
     """
+    compiled = _compiled()
     check_index_width(mesh.vertex_count, len(mesh.faces))
     faces = np.ascontiguousarray(mesh.faces, dtype=np.int32)
     alive = np.ascontiguousarray(mesh.alive).view(np.uint8)
-    reducer = _NATIVE.Reducer(
+    reducer = compiled.Reducer(
         mesh.positions,
         faces,
         alive,
@@ -123,7 +134,7 @@ def ends_given_up(
     point_count: int,
 ) -> tuple[IndexArray, IndexArray]:
     """:func:`opengl_decimate.corners.ends_given_up_in_python`, in C."""
-    return _NATIVE.ends_given_up(
+    return _compiled().ends_given_up(
         np.ascontiguousarray(points, dtype='d').reshape(-1, 3),
         np.ascontiguousarray(placement, dtype='d').reshape(-1, 3),
         np.ascontiguousarray(dying, dtype=np.int64),
