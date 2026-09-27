@@ -2,7 +2,7 @@
 
 A mesh arrives as a mapping of glTF attribute semantics to arrays plus a
 triangle index array, and leaves the same way, so nothing stands between a
-generator, a loader, a decimator and a vertex buffer:
+generator, a loader, a decimator and a vertex buffer::
 
     from opengl_decimate import simplify, SimplifyOptions
 

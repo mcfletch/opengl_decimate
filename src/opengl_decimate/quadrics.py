@@ -6,7 +6,7 @@ that make decimation possible. Quadrics **add**, so the cost of merging two
 vertices is the sum of their quadrics; and the point that minimises one is found
 by a single 3x3 solve rather than by search.
 
-The 4x4 is stored as its ten distinct coefficients, in the order
+The 4x4 is stored as its ten distinct coefficients, in the order ::
 
     a00 a01 a02 a03 a11 a12 a13 a22 a23 a33
 
@@ -23,7 +23,7 @@ either above zero
     Gaussian, and the value is the *expected* squared distance. For a plane with
     mean normal ``n``, mean point ``p``, and isotropic variances
     ``s_n^2`` and ``s_p^2``, expanding ``E[((x - p).n)^2]`` over both
-    distributions gives
+    distributions gives ::
 
         A = n n' + s_n^2 I
         b = (n.p) n + s_n^2 p

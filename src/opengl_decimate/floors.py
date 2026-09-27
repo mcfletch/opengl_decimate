@@ -28,7 +28,7 @@ option would cost.
 :func:`survey` measures all three and puts a floor on what any reduction can
 reach. A caller who finds that floor near the triangle count they started with
 has a model that wants a different operation -- an imposter, a re-authored
-atlas, foliage baked onto larger cards -- rather than a lower target.
+atlas, foliage baked onto larger cards -- rather than a lower target. ::
 
     from opengl_decimate import survey
 
