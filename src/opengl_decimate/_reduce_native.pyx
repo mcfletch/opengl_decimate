@@ -883,6 +883,10 @@ cdef class Reducer:
                 continue
             # And only along a seam: an edge with a different chart on each
             # side. Across a chart, it would take one seam onto another.
+            # ``on_edge`` still holds the faces _faces_on_edge found for this
+            # edge above: nothing since has filled it (_count_on_edge does
+            # not), and a call placed between the two that did would change
+            # what is read here.
             if self.copies[a] > 1 and (
                     edge_faces != 2
                     or self.charts[self.on_edge.data[0]] == self.charts[self.on_edge.data[1]]):
