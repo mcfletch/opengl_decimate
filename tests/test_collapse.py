@@ -248,3 +248,53 @@ class TestNothingToDistort:
         positions = np.asarray([(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)], dtype='f4')
         mesh = topology.build(positions, np.asarray([0, 1, 2], dtype=np.uint32))
         assert not collapse.would_distort(mesh, 0, 1, mesh.positions[1])
+
+
+class TestASeamReachingTheOutline:
+    """A point drawn at two texture coordinates moves only along its seam.
+
+    It merges only with a point drawn as many times, across an edge with a
+    different chart on each side. Where the seam meets the patch's outline,
+    its neighbours along the outline are drawn once, so the seam's end stays
+    where it is rather than sliding along the outline.
+    """
+
+    @staticmethod
+    def _seamed():
+        """A flat patch cut by a seam down its middle, x = 0."""
+        positions, indices = shapes.grid(9)
+        positions = np.asarray(positions, dtype='d')
+        faces = np.asarray(indices, dtype=np.int64).reshape(-1, 3)
+        right = positions[faces][:, :, 0].mean(axis=1) > 0.0
+        # The right half draws from copies of its points in a chart of its own.
+        doubled = np.concatenate([positions, positions])
+        uv = np.concatenate([positions[:, [0, 2]], positions[:, [0, 2]] + 10.0])
+        faces[right] += len(positions)
+        mesh = topology.build(doubled, faces.reshape(-1),
+                              carried={'TEXCOORD_0': uv.astype('f4')})
+        return mesh, mesh.classify()
+
+    def _outline_ends(self, mesh, kinds):
+        return [point for point in range(len(mesh.copies))
+                if mesh.copies[point] > 1
+                and kinds[point] == topology.VertexClass.BORDER]
+
+    def test_the_seams_ends_are_on_the_outline(self):
+        mesh, kinds = self._seamed()
+        assert len(self._outline_ends(mesh, kinds)) == 2
+
+    def test_an_end_does_not_move_along_the_outline(self):
+        mesh, kinds = self._seamed()
+        for end in self._outline_ends(mesh, kinds):
+            for other in range(len(mesh.copies)):
+                if other != end and mesh.is_boundary_edge(end, other):
+                    assert not collapse.is_legal(mesh, kinds, end, other)
+
+    def test_a_point_inside_moves_along_the_seam(self):
+        mesh, kinds = self._seamed()
+        inside = [point for point in range(len(mesh.copies))
+                  if mesh.copies[point] > 1
+                  and kinds[point] != topology.VertexClass.BORDER]
+        assert any(collapse.is_legal(mesh, kinds, point, other)
+                   for point in inside for other in inside
+                   if point != other and mesh.along_a_seam(point, other))
