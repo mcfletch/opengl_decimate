@@ -270,14 +270,15 @@ class TestASeamReachingTheOutline:
         doubled = np.concatenate([positions, positions])
         uv = np.concatenate([positions[:, [0, 2]], positions[:, [0, 2]] + 10.0])
         faces[right] += len(positions)
-        mesh = topology.build(doubled, faces.reshape(-1),
-                              carried={'TEXCOORD_0': uv.astype('f4')})
+        mesh = topology.build(doubled, faces.reshape(-1), carried={'TEXCOORD_0': uv.astype('f4')})
         return mesh, mesh.classify()
 
     def _outline_ends(self, mesh, kinds):
-        return [point for point in range(len(mesh.copies))
-                if mesh.copies[point] > 1
-                and kinds[point] == topology.VertexClass.BORDER]
+        return [
+            point
+            for point in range(len(mesh.copies))
+            if mesh.copies[point] > 1 and kinds[point] == topology.VertexClass.BORDER
+        ]
 
     def test_the_seams_ends_are_on_the_outline(self):
         mesh, kinds = self._seamed()
@@ -292,9 +293,14 @@ class TestASeamReachingTheOutline:
 
     def test_a_point_inside_moves_along_the_seam(self):
         mesh, kinds = self._seamed()
-        inside = [point for point in range(len(mesh.copies))
-                  if mesh.copies[point] > 1
-                  and kinds[point] != topology.VertexClass.BORDER]
-        assert any(collapse.is_legal(mesh, kinds, point, other)
-                   for point in inside for other in inside
-                   if point != other and mesh.along_a_seam(point, other))
+        inside = [
+            point
+            for point in range(len(mesh.copies))
+            if mesh.copies[point] > 1 and kinds[point] != topology.VertexClass.BORDER
+        ]
+        assert any(
+            collapse.is_legal(mesh, kinds, point, other)
+            for point in inside
+            for other in inside
+            if point != other and mesh.along_a_seam(point, other)
+        )
