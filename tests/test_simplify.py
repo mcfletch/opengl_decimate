@@ -310,16 +310,24 @@ class TestSchedules:
         assert _triangles(result) <= 0.25 * (len(indices) // 3)
 
     def test_the_heap_is_the_better_of_the_two(self):
-        """Sampling trades a little quality for dropping the global ordering."""
+        """Sampling trades a little quality for dropping the global ordering.
+
+        How much depends on the draw, and one draw in ten on this sphere costs
+        more than four times the heap's error, so the bound is on the median
+        of several seeds.
+        """
         positions, indices = shapes.icosphere(3)
         heap = simplify({'POSITION': positions}, indices, SimplifyOptions(target_ratio=0.15))
-        sampled = simplify(
-            {'POSITION': positions},
-            indices,
-            SimplifyOptions(target_ratio=0.15, schedule='multiple-choice'),
+        sampled = sorted(
+            simplify(
+                {'POSITION': positions},
+                indices,
+                SimplifyOptions(target_ratio=0.15, schedule='multiple-choice', seed=seed),
+            ).error
+            for seed in range(9)
         )
-        assert heap.error <= sampled.error
-        assert sampled.error < 4.0 * max(heap.error, 1e-9)
+        assert heap.error <= sampled[0]
+        assert sampled[len(sampled) // 2] < 4.0 * max(heap.error, 1e-9)
 
     def test_the_same_seed_gives_the_same_mesh(self):
         positions, indices = shapes.icosphere(3)

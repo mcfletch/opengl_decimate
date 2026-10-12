@@ -5,8 +5,7 @@ out, has an edge on three triangles, or has two triangles occupying the same
 place. Each test here is one of those outcomes, set up so it would happen.
 """
 
-import tracemalloc
-
+import allocation
 import numpy as np
 import pytest
 import shapes
@@ -206,39 +205,31 @@ class TestCostOfOneContraction:
     def test_testing_the_placement_allocates_a_neighbourhood_not_a_mesh(self):
         mesh, dying, surviving = self._big()
         placement = mesh.positions[surviving]
-        tracemalloc.start()
-        try:
+        with allocation.traced() as peak:
             collapse.would_distort(mesh, dying, surviving, placement)
-            _, peak = tracemalloc.get_traced_memory()
-        finally:
-            tracemalloc.stop()
         # The mesh's positions alone are 160,000 * 3 * 8 bytes.
-        assert peak < 200_000, 'allocated %.1f MB to test one contraction' % (peak / 1e6)
+        assert peak.bytes < 200_000, 'allocated %.1f MB to test one contraction' % (
+            peak.bytes / 1e6
+        )
 
     def test_applying_it_allocates_a_neighbourhood_not_a_mesh(self):
         mesh, dying, surviving = self._big()
         placement = mesh.positions[surviving]
-        tracemalloc.start()
-        try:
+        with allocation.traced() as peak:
             collapse.contract(mesh, dying, surviving, placement)
-            _, peak = tracemalloc.get_traced_memory()
-        finally:
-            tracemalloc.stop()
-        assert peak < 200_000, 'allocated %.1f MB to apply one contraction' % (peak / 1e6)
+        assert peak.bytes < 200_000, 'allocated %.1f MB to apply one contraction' % (
+            peak.bytes / 1e6
+        )
 
     def test_counting_the_live_faces_does_not_scan_them(self):
         """It is asked once per contraction, so it cannot be a pass over the mesh."""
         mesh, dying, surviving = self._big()
         before = mesh.face_count
         collapse.contract(mesh, dying, surviving, mesh.positions[surviving])
-        tracemalloc.start()
-        try:
+        with allocation.traced() as peak:
             counted = mesh.face_count
-            _, peak = tracemalloc.get_traced_memory()
-        finally:
-            tracemalloc.stop()
         assert counted == before - 2
-        assert peak < 10_000
+        assert peak.bytes < 10_000
 
 
 class TestNothingToDistort:

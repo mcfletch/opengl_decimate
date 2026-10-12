@@ -8,8 +8,8 @@ produced, and that asking fifty times costs about what asking once costs.
 """
 
 import itertools
-import tracemalloc
 
+import allocation
 import numpy as np
 import pytest
 import shapes
@@ -205,13 +205,10 @@ class TestReplayCost:
         sequence = collapse_sequence(attributes, indices)
 
         def peak_over(count):
-            tracemalloc.start()
-            try:
+            with allocation.traced() as peak:
                 for _ in range(count):
                     sequence.at(target_count=2000)
-                return tracemalloc.get_traced_memory()[1]
-            finally:
-                tracemalloc.stop()
+            return peak.bytes
 
         one = peak_over(1)
         fifty = peak_over(50)

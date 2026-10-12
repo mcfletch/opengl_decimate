@@ -29,6 +29,15 @@ except ImportError:  # pragma: no cover - no Cython
 # the same order as the NumPy loop -- see the note in `tox.ini`.
 LINETRACE = bool(os.environ.get('OPENGL_DECIMATE_LINETRACE'))
 
+# The compiled reducer has to round as the NumPy one does, since the two are
+# required to make the same contractions in the same order and a cost that
+# differs in its last bit reorders a tie. A compiler free to contract
+# ``a * b + c`` into one fused multiply-add rounds once where NumPy rounds
+# twice: clang does so by default, and GCC wherever the target has the
+# instruction, which arm64 always does. MSVC does not contract under its
+# default ``/fp:precise``.
+NO_CONTRACTION = '-ffp-contract=off'
+
 
 class build_ext(_build_ext):
     """A failed build of an optional accelerator is not a failed install."""
@@ -43,6 +52,8 @@ class build_ext(_build_ext):
             )
 
     def build_extension(self, ext):
+        if self.compiler.compiler_type != 'msvc':
+            ext.extra_compile_args.append(NO_CONTRACTION)
         try:
             super().build_extension(ext)
         except Exception as error:  # noqa: BLE001 any toolchain failure leaves NumPy  # pragma: no cover

@@ -39,8 +39,10 @@ are against those builds, for anyone who installed one from source.
   charts of a mesh, and the floors they put under any reduction of it.
 - A compiled reducer (`_reduce_native`, Cython) for the `heap` schedule and the
   corner handover, making the same contractions in the same order as the NumPy
-  loop. Wheels carry it; `opengl_decimate.native.ACCELERATED` says whether it is
-  in use, and `OPENGL_DECIMATE_NO_ACCEL=1` switches it off.
+  loop. It is built with `-ffp-contract=off`, so it rounds as NumPy does on a
+  target with a fused multiply-add, arm64 among them. Wheels carry it;
+  `opengl_decimate.native.ACCELERATED` says whether it is in use, and
+  `OPENGL_DECIMATE_NO_ACCEL=1` switches it off.
 
 ### Changed
 

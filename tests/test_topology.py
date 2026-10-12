@@ -5,8 +5,7 @@ whose answers are settled by inspection -- a closed tetrahedron has no border, a
 grid's rim is all border, a bowtie vertex is not on a surface at all.
 """
 
-import tracemalloc
-
+import allocation
 import numpy as np
 import pytest
 import shapes
@@ -303,16 +302,12 @@ class TestAdjacencyIsNotBuiltUntilItIsWanted:
 
     def test_building_a_mesh_does_not_build_the_adjacency(self):
         positions, indices = shapes.grid(300)  # 90,000 points
-        tracemalloc.start()
-        try:
+        with allocation.traced() as peak:
             mesh = topology.build(positions, indices)
-            _, peak = tracemalloc.get_traced_memory()
-        finally:
-            tracemalloc.stop()
         arrays = mesh.faces.nbytes + mesh.positions.nbytes + mesh.corners.nbytes
-        assert peak < 4 * arrays, (
+        assert peak.bytes < 4 * arrays, (
             'building a %d-face mesh peaked at %.0f MB against %.0f MB of arrays'
-            % (mesh.face_count, peak / 1e6, arrays / 1e6)
+            % (mesh.face_count, peak.bytes / 1e6, arrays / 1e6)
         )
 
     def test_the_adjacency_is_still_there_when_asked_for(self):
