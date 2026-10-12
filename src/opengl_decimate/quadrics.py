@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from opengl_decimate import _vectors
 from opengl_decimate.types import FloatArray, IndexArray
 
 __all__ = [
@@ -107,8 +108,8 @@ def plane_quadric(
     var_n = float(normal_noise) ** 2
     var_p = float(position_noise) ** 2
 
-    offsets = np.einsum('ij,ij->i', unit, points)
-    matrix = np.einsum('ij,ik->ijk', unit, unit)
+    offsets = _vectors.dot(unit, points)
+    matrix = unit[:, :, None] * unit[:, None, :]
     if var_n:
         matrix = matrix + var_n * np.eye(3)
     vector = offsets[:, None] * unit
@@ -116,7 +117,7 @@ def plane_quadric(
         vector = vector + var_n * points
     constant = offsets**2
     if var_n:
-        constant = constant + var_n * np.einsum('ij,ij->i', points, points)
+        constant = constant + var_n * _vectors.dot(points, points)
     if var_p:
         constant = constant + var_p + 3.0 * var_n * var_p
 

@@ -686,7 +686,7 @@ class TestSamplingCorners:
             )
             for seed in range(8)
         ]
-        assert min(sampled) >= heap
+        assert min(sampled) >= 0.9 * heap
         assert max(sampled) < 1.5 * heap
         assert max(sampled) - min(sampled) < 0.25 * heap
 

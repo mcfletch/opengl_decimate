@@ -23,6 +23,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from opengl_decimate import _vectors
 from opengl_decimate.spatial import CellGrid, shell, shell_size
 from opengl_decimate.types import FloatArray, IndexArray
 
@@ -160,7 +161,7 @@ def _nearest_among(points: FloatArray, corners: FloatArray) -> tuple[FloatArray,
         for first in range(0, len(corners), triangles_at_once):
             some = corners[first : first + triangles_at_once]
             offsets = _closest_on_triangles(block, some) - block[:, None, :]
-            apart = np.einsum('ijk,ijk->ij', offsets, offsets)
+            apart = _vectors.dot(offsets, offsets)
             here = np.argmin(apart, axis=1)
             found = apart[np.arange(len(block)), here]
             better = found < best[start:stop]
@@ -295,7 +296,7 @@ def _nearest_by_grid(points: FloatArray, corners: FloatArray) -> tuple[FloatArra
 def _paired_distances(points: FloatArray, corners: FloatArray) -> FloatArray:
     """Squared distance from each point to the triangle in the same row."""
     offsets = _closest(points, corners[:, 0], corners[:, 1], corners[:, 2]) - points
-    return np.einsum('ij,ij->i', offsets, offsets)
+    return _vectors.dot(offsets, offsets)
 
 
 def _closest_on_triangles(points: FloatArray, corners: FloatArray) -> FloatArray:
@@ -320,14 +321,14 @@ def _closest(points: FloatArray, a: FloatArray, b: FloatArray, c: FloatArray) ->
     along, across = b - a, c - a
     offset = points - a
 
-    edge_here = np.einsum('...j,...j->...', along, offset)
-    edge_there = np.einsum('...j,...j->...', across, offset)
+    edge_here = _vectors.dot(along, offset)
+    edge_there = _vectors.dot(across, offset)
     from_b = points - b
-    b_along = np.einsum('...j,...j->...', along, from_b)
-    b_across = np.einsum('...j,...j->...', across, from_b)
+    b_along = _vectors.dot(along, from_b)
+    b_across = _vectors.dot(across, from_b)
     from_c = points - c
-    c_along = np.einsum('...j,...j->...', along, from_c)
-    c_across = np.einsum('...j,...j->...', across, from_c)
+    c_along = _vectors.dot(along, from_c)
+    c_across = _vectors.dot(across, from_c)
 
     face_c = edge_here * b_across - b_along * edge_there
     face_b = c_along * edge_there - edge_here * c_across

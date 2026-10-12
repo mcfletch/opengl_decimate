@@ -31,6 +31,7 @@ from enum import IntEnum
 
 import numpy as np
 
+from opengl_decimate import _vectors
 from opengl_decimate.corners import copies_per_point
 from opengl_decimate.spatial import NEIGHBOURHOOD, CellGrid
 from opengl_decimate.types import POSITION, AttributeMap, DecimateError, FloatArray, IndexArray
@@ -141,7 +142,7 @@ def _close_pairs(positions: FloatArray, tolerance: float) -> tuple[IndexArray, I
                 keep = left < right
                 left, right = left[keep], right[keep]
             delta = positions[left] - positions[right]
-            close = np.einsum('ij,ij->i', delta, delta) <= limit
+            close = _vectors.dot(delta, delta) <= limit
             if np.any(close):
                 found.append((left[close], right[close]))
 
@@ -573,7 +574,7 @@ def smoothing_groups(
         if crease_angle > 0.0:
             plane = _face_normals(np.asarray(positions, dtype='d'), faces)
             # A corner names its face: the flat index divided by three.
-            meeting = np.einsum('ij,ij->i', plane[links_from // 3], plane[links_to // 3])
+            meeting = _vectors.dot(plane[links_from // 3], plane[links_to // 3])
             keep &= meeting >= math.cos(math.radians(crease_angle))
         links_from, links_to = links_from[keep], links_to[keep]
     return _connected(links_from, links_to, count=faces.size)
@@ -673,7 +674,7 @@ def _too_small(points: FloatArray, faces: IndexArray, share: float) -> np.ndarra
     with np.errstate(invalid='ignore'):
         reach = np.linalg.norm(high - low, axis=1)
     reach[~np.isfinite(reach)] = 0.0
-    whole = float(np.linalg.norm(np.max(points, axis=0) - np.min(points, axis=0)))
+    whole = float(_vectors.length(np.max(points, axis=0) - np.min(points, axis=0)))
     per_face = label[faces[:, 0]]
     biggest = int(np.argmax(reach))
     return (reach[per_face] < share * whole) & (per_face != biggest)

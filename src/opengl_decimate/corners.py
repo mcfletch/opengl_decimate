@@ -306,4 +306,7 @@ def _nearest_copy(
     reach = np.minimum(np.arange(int(counts.max()), dtype=np.int64)[None, :], (counts - 1)[:, None])
     candidates = order[start[kept][:, None] + reach]
     apart = key[candidates] - key[moved][:, None, :]
-    return candidates[np.arange(len(moved)), np.argmin(np.einsum('ijk,ijk->ij', apart, apart), 1)]
+    # A key is as wide as the attributes it joins, so the squares are summed by
+    # `np.sum` -- which, unlike `np.einsum`, adds in the same order and rounds
+    # the same way on every platform.
+    return candidates[np.arange(len(moved)), np.argmin(np.sum(apart * apart, axis=2), 1)]

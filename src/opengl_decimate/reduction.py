@@ -30,7 +30,7 @@ from typing import Any
 
 import numpy as np
 
-from opengl_decimate import certify, collapse, native, quadrics, topology
+from opengl_decimate import _vectors, certify, collapse, native, quadrics, topology
 from opengl_decimate.options import SimplifyOptions
 from opengl_decimate.sequence import CollapseSequence, SimplifyResult
 from opengl_decimate.topology import Topology, VertexClass
@@ -226,7 +226,7 @@ class _Engine:
         face_normal = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
         along = mesh.positions[edges[:, 1]] - mesh.positions[edges[:, 0]]
         wall = np.cross(along, face_normal)
-        weight = self.options.boundary_weight * np.einsum('ij,ij->i', along, along)
+        weight = self.options.boundary_weight * _vectors.dot(along, along)
         constraint = quadrics.plane_quadric(
             wall,
             mesh.positions[edges[:, 0]],
@@ -499,7 +499,7 @@ def _diagonal(positions: FloatArray) -> float:
     if not len(positions):
         return 1.0
     span = np.max(positions, axis=0) - np.min(positions, axis=0)
-    return float(np.linalg.norm(span)) or 1.0
+    return float(_vectors.length(span)) or 1.0
 
 
 def _face_areas(positions: FloatArray, faces: IndexArray) -> FloatArray:

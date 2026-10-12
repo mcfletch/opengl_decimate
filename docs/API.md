@@ -172,6 +172,10 @@ builds it where a C compiler is available and otherwise installs without it.
 - `OPENGL_DECIMATE_NO_ACCEL` — set to any non-empty value before the package is
   imported to use the NumPy loop even where the compiled one is built.
 
+The same arrays and options reduce to the same mesh through either reducer, and
+on x86-64 and arm64 alike. Both add the products of a dot product one at a
+time, each rounded once, and neither uses a fused multiply-add.
+
 ```python
 from opengl_decimate import native
 

@@ -26,6 +26,7 @@ import math
 
 import numpy as np
 
+from opengl_decimate import _vectors
 from opengl_decimate.topology import Topology, VertexClass
 from opengl_decimate.types import FloatArray
 
@@ -125,11 +126,7 @@ def triangle_quality(corners: FloatArray) -> FloatArray:
     second = corners[:, 2] - corners[:, 1]
     third = corners[:, 0] - corners[:, 2]
     area = 0.5 * np.linalg.norm(np.cross(first, corners[:, 2] - corners[:, 0]), axis=1)
-    lengths = (
-        np.einsum('ij,ij->i', first, first)
-        + np.einsum('ij,ij->i', second, second)
-        + np.einsum('ij,ij->i', third, third)
-    )
+    lengths = _vectors.dot(first, first) + _vectors.dot(second, second) + _vectors.dot(third, third)
     return np.where(lengths > _TINY, 4.0 * math.sqrt(3.0) * area / np.maximum(lengths, _TINY), 0.0)
 
 
@@ -189,7 +186,7 @@ def would_distort(
         return True
     comparable = (old_length > _TINY) & ~vanished
     if np.any(comparable):
-        cosines = np.einsum('ij,ij->i', old[comparable], new[comparable]) / (
+        cosines = _vectors.dot(old[comparable], new[comparable]) / (
             old_length[comparable] * new_length[comparable]
         )
         if np.any(cosines < math.cos(math.radians(max_normal_flip))):
