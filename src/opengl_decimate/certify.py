@@ -25,7 +25,7 @@ import numpy as np
 
 from opengl_decimate import _vectors
 from opengl_decimate.spatial import CellGrid, shell, shell_size
-from opengl_decimate.types import FloatArray, IndexArray
+from opengl_decimate.types import FloatArray, IndexArray, index_width
 
 __all__ = [
     'Deviation',
@@ -193,7 +193,7 @@ def _grid_side(low: FloatArray, high: FloatArray) -> float:
 def _register(low: IndexArray, high: IndexArray) -> tuple[IndexArray, IndexArray]:
     """Every cell each box covers: the cell coordinates, and whose box it is."""
     extents = high - low + 1
-    total = np.prod(extents, axis=1)
+    total = index_width(np.prod(extents, axis=1))
     owner = np.repeat(np.arange(len(low), dtype=np.int64), total)
     ramp = np.arange(int(total.sum()), dtype=np.int64) - np.repeat(np.cumsum(total) - total, total)
     plane = np.repeat(extents[:, 1] * extents[:, 2], total)
@@ -276,7 +276,7 @@ def _nearest_by_grid(points: FloatArray, corners: FloatArray) -> tuple[FloatArra
                 # won can be named. The first of a tie will do: they are the
                 # same distance, which is what the answer is about.
                 sizes = np.diff(np.append(starts, len(found)))
-                at_best = found == np.repeat(closest, sizes)
+                at_best = found == np.repeat(closest, index_width(sizes))
                 first_best = np.minimum.reduceat(
                     np.where(at_best, np.arange(len(found)), len(found)), starts
                 )

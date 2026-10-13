@@ -56,7 +56,7 @@ from __future__ import annotations
 import numpy as np
 
 from opengl_decimate import _vectors
-from opengl_decimate.types import FloatArray, IndexArray
+from opengl_decimate.types import FloatArray, IndexArray, index_width
 
 __all__ = [
     'QUADRIC_SIZE',
@@ -172,7 +172,9 @@ def scatter(values: FloatArray, targets: IndexArray, count: int) -> FloatArray:
     targets = np.asarray(targets).reshape(-1)
     out = np.zeros((count, QUADRIC_SIZE), dtype='d')
     for coefficient in range(QUADRIC_SIZE):
-        out[:, coefficient] = np.bincount(targets, weights=values[:, coefficient], minlength=count)
+        out[:, coefficient] = np.bincount(
+            index_width(targets), weights=values[:, coefficient], minlength=count
+        )
     return out
 
 

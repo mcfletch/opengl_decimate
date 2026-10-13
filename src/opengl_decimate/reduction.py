@@ -34,7 +34,14 @@ from opengl_decimate import _vectors, certify, collapse, native, quadrics, topol
 from opengl_decimate.options import SimplifyOptions
 from opengl_decimate.sequence import CollapseSequence, SimplifyResult
 from opengl_decimate.topology import Topology, VertexClass
-from opengl_decimate.types import POSITION, AttributeMap, DecimateError, FloatArray, IndexArray
+from opengl_decimate.types import (
+    POSITION,
+    AttributeMap,
+    DecimateError,
+    FloatArray,
+    IndexArray,
+    index_width,
+)
 
 __all__ = ['simplify', 'collapse_sequence']
 
@@ -147,7 +154,7 @@ class _Engine:
 
         areas = _face_areas(mesh.positions, faces)
         self.weights = np.bincount(
-            faces.reshape(-1), weights=np.repeat(areas, 3), minlength=mesh.vertex_count
+            index_width(faces.reshape(-1)), weights=np.repeat(areas, 3), minlength=mesh.vertex_count
         )
 
         self.face_limit = 0 if exhaust else self._face_limit()

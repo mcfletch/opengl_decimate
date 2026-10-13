@@ -18,7 +18,7 @@ from collections.abc import Iterator
 
 import numpy as np
 
-from opengl_decimate.types import IndexArray
+from opengl_decimate.types import IndexArray, index_width
 
 __all__ = ['CellGrid', 'NEIGHBOURHOOD', 'shell', 'shell_size']
 
@@ -144,7 +144,7 @@ class CellGrid:
                 cut + 1,
                 int(np.searchsorted(running, running[cut] - sizes[cut] + block, side='right')),
             )
-            per = sizes[cut:end]
+            per = index_width(sizes[cut:end])
             # The concatenated ``arange(0, n)`` of each cell, without a loop: a
             # ramp over the whole batch, less the running start of the cell each
             # entry belongs to.

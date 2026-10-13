@@ -12,6 +12,7 @@ import numpy as np
 import shapes
 
 from opengl_decimate import SimplifyOptions, collapse_sequence, simplify
+from opengl_decimate.types import index_width
 
 
 def _linear_uv(positions):
@@ -213,7 +214,7 @@ class TestASeamStaysASeam:
         """The fixture is what it claims: one position, two charts, neither fault."""
         attributes, indices = self._two_charts()
         sequence = collapse_sequence(attributes, indices)
-        copies = np.bincount(sequence.vertex_point, minlength=len(sequence.points))
+        copies = np.bincount(index_width(sequence.vertex_point), minlength=len(sequence.points))
         assert int(np.sum(copies > 1)) > 8, 'the seam did not weld into shared points'
         assert not np.any(self._torn(attributes, indices))
         assert not np.any(self._adrift(attributes, indices))

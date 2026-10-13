@@ -34,7 +34,14 @@ import numpy as np
 from opengl_decimate import _vectors
 from opengl_decimate.corners import copies_per_point
 from opengl_decimate.spatial import NEIGHBOURHOOD, CellGrid
-from opengl_decimate.types import POSITION, AttributeMap, DecimateError, FloatArray, IndexArray
+from opengl_decimate.types import (
+    POSITION,
+    AttributeMap,
+    DecimateError,
+    FloatArray,
+    IndexArray,
+    index_width,
+)
 
 __all__ = [
     'VertexClass',
@@ -175,11 +182,10 @@ def _by_first_appearance(
     if not average:
         return positions[first_member[order]], renumbered
     points = np.zeros((count, 3), dtype='d')
-    members = np.bincount(renumbered, minlength=count).astype('d')
+    bins = index_width(renumbered)
+    members = np.bincount(bins, minlength=count).astype('d')
     for axis in range(3):
-        points[:, axis] = (
-            np.bincount(renumbered, weights=positions[:, axis], minlength=count) / members
-        )
+        points[:, axis] = np.bincount(bins, weights=positions[:, axis], minlength=count) / members
     return points, renumbered
 
 
@@ -409,7 +415,7 @@ class Topology:
             kinds[over] = VertexClass.LOCKED
 
             border_ends = edges[counts == 1].reshape(-1)
-            border_count = np.bincount(border_ends, minlength=self.vertex_count)
+            border_count = np.bincount(index_width(border_ends), minlength=self.vertex_count)
             # A point on a well-formed border has exactly two border edges. More
             # than two is a pinch: two sheets meeting at a point, which no single
             # placement can serve.
@@ -483,7 +489,7 @@ def _paired_half_edges(faces: IndexArray) -> tuple[IndexArray, IndexArray]:
     opens = np.empty(len(order), dtype=bool)
     opens[0] = True
     opens[1:] = (low[order][1:] != low[order][:-1]) | (high[order][1:] != high[order][:-1])
-    sizes = np.bincount(np.cumsum(opens) - 1)
+    sizes = np.bincount(index_width(np.cumsum(opens) - 1))
     starts = np.flatnonzero(opens)[sizes == 2]
 
     first, second = order[starts], order[starts + 1]
@@ -533,7 +539,7 @@ def _multi_fan_points(faces: IndexArray) -> IndexArray:
     """
     label = _connected(*_paired_half_edges(faces), count=faces.size)
     fans = np.unique(_pair_keys(np.stack([faces.reshape(-1), label], axis=1), faces.size))
-    return np.flatnonzero(np.bincount(fans // faces.size) > 1)
+    return np.flatnonzero(np.bincount(index_width(fans // faces.size)) > 1)
 
 
 def smoothing_groups(

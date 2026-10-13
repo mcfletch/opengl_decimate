@@ -30,7 +30,7 @@ import numpy as np
 
 from opengl_decimate import topology
 from opengl_decimate.corners import corner_moves, follow
-from opengl_decimate.types import POSITION, FloatArray, IndexArray
+from opengl_decimate.types import POSITION, FloatArray, IndexArray, index_width
 
 __all__ = ['SimplifyResult', 'CollapseSequence']
 
@@ -124,7 +124,7 @@ class CollapseSequence:
         if self.input_faces is None:
             self.input_faces = len(self.faces)
         removals = self.removed_at[self.removed_at >= 0]
-        per_step = np.bincount(removals, minlength=len(self.dying) + 1)
+        per_step = np.bincount(index_width(removals), minlength=len(self.dying) + 1)
         self._removed_by_step = np.concatenate([[0], np.cumsum(per_step)])
         self._moved, self._moved_to, self._moved_by_step = corner_moves(
             self.points,

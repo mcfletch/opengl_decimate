@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from opengl_decimate.types import POSITION, FloatArray, IndexArray
+from opengl_decimate.types import POSITION, FloatArray, IndexArray, index_width
 
 __all__ = ['corner_moves', 'copies_per_point', 'follow']
 
@@ -96,12 +96,12 @@ def corner_moves(
 
     # The copies of every end given up, concatenated: a flat run per step, read
     # straight out of `order` rather than gathered a step at a time.
-    within = np.arange(total, dtype=np.int64) - np.repeat(step_start[:-1], per_step)
-    moved = order[np.repeat(start[loser], per_step) + within]
+    within = np.arange(total, dtype=np.int64) - np.repeat(step_start[:-1], index_width(per_step))
+    moved = order[np.repeat(start[loser], index_width(per_step)) + within]
 
     # The winning end's first copy is the answer wherever it is its only one,
     # which is every point off a seam.
-    kept = np.repeat(winner, per_step)
+    kept = np.repeat(winner, index_width(per_step))
     moved_to = order[start[kept]]
 
     key = _attribute_key(attributes, len(vertex_point))
@@ -157,7 +157,7 @@ def copies_per_point(
         return counted
     rows = np.concatenate([point[:, None].astype('d'), key[used]], axis=1)
     distinct = np.unique(rows, axis=0)[:, 0].astype(np.int64)
-    counted[distinct] = np.bincount(distinct, minlength=point_count)[distinct]
+    counted[distinct] = np.bincount(index_width(distinct), minlength=point_count)[distinct]
     return counted
 
 
@@ -189,7 +189,7 @@ def _copies_by_point(
     """
     order = np.argsort(np.where(used, vertex_point, point_count), kind='stable')
     order = order[: int(used.sum())].astype(np.int64)
-    counts = np.bincount(vertex_point[used], minlength=point_count)
+    counts = np.bincount(index_width(vertex_point[used]), minlength=point_count)
     return order, np.concatenate([[0], np.cumsum(counts)]).astype(np.int64)
 
 

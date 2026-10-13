@@ -18,6 +18,7 @@ __all__ = [
     'AttributeMap',
     'POSITION',
     'DecimateError',
+    'index_width',
 ]
 
 #: A float array of any shape. NumPy's own generic alias carries no shape, so
@@ -35,3 +36,14 @@ POSITION = 'POSITION'
 
 class DecimateError(ValueError):
     """The input does not describe a triangle mesh this package can work on."""
+
+
+def index_width(integers: IndexArray) -> IndexArray:
+    """``integers`` as ``numpy.intp``, the width of an index on this platform.
+
+    ``numpy.repeat`` takes its counts and ``numpy.bincount`` its bins at that
+    width and refuses a wider one, which the ``int64`` this package keeps its
+    indices in is on a 32-bit platform. Where the two widths are the same the
+    array is returned as it is.
+    """
+    return integers.astype(np.intp, copy=False)
